@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 namespace astral::dsp {
@@ -15,27 +16,32 @@ float clamp01(float value)
     return std::clamp(value, 0.0f, 1.0f);
 }
 
+// Converts invalid floating-point values to silence before they enter feedback paths.
 float sanitize(float value)
 {
     return std::isfinite(value) ? value : 0.0f;
 }
 
+// Keeps delay/reverb feedback bounded without a hard clipping edge.
 float softClip(float value)
 {
     return std::tanh(value);
 }
 
+// Converts a musical delay time into a delay-line read distance.
 float millisecondsToSamples(float milliseconds, double sampleRate)
 {
     return milliseconds * static_cast<float>(sampleRate) * 0.001f;
 }
 
+// Produces a stable one-pole low-pass coefficient from a cutoff frequency.
 float onePoleCoefficient(float cutoffHz, double sampleRate)
 {
     const float normalized = std::clamp(cutoffHz / static_cast<float>(sampleRate), 0.0001f, 0.49f);
     return 1.0f - std::exp(-kTwoPi * normalized);
 }
 
+// Advances an oscillator phase and wraps it into a single cycle.
 void advanceWrapped(float& phase, float increment)
 {
     phase += increment;
@@ -44,14 +50,22 @@ void advanceWrapped(float& phase, float increment)
     }
 }
 
-float equalPowerDry(float mix)
-{
-    return std::cos(clamp01(mix) * kPi * 0.5f);
-}
-
+// Computes the wet side of the equal-power wet/dry crossfade.
 float equalPowerWet(float mix)
 {
     return std::sin(clamp01(mix) * kPi * 0.5f);
+}
+
+// Reads one zodiac effect amount from a mapped modulation frame.
+float signEffect(const astro::AstroModulationFrame& frame, astro::ZodiacSign sign)
+{
+    return std::clamp(frame.signEffects[static_cast<std::size_t>(sign)], 0.0f, 1.0f);
+}
+
+std::uint32_t nextNoise(std::uint32_t& state)
+{
+    state = state * 1664525u + 1013904223u;
+    return state;
 }
 
 } // namespace
@@ -112,6 +126,60 @@ float AstralReverbDelay::OnePoleLowPass::process(float input, float coefficient)
     return state;
 }
 
+void AstralReverbDelay::KarplusPluck::prepare(int maxSamples)
+{
+    samples.assign(std::max(2, maxSamples), 0.0f);
+    reset();
+}
+
+void AstralReverbDelay::KarplusPluck::reset()
+{
+    std::fill(samples.begin(), samples.end(), 0.0f);
+    size = std::min<int>(static_cast<int>(samples.size()), 96);
+    index = 0;
+    level = 0.0f;
+    feedback = 0.0f;
+}
+
+void AstralReverbDelay::KarplusPluck::trigger(float newLevel, float tone, float frequencyHz, double currentSampleRate)
+{
+    if (samples.empty()) {
+        return;
+    }
+
+    const float clampedTone = clamp01(tone);
+    const float frequency = std::clamp(frequencyHz, 35.0f, 2400.0f);
+    size = std::clamp(
+        static_cast<int>(currentSampleRate / static_cast<double>(frequency)),
+        16,
+        static_cast<int>(samples.size()));
+    index = 0;
+    level = std::max(level, clamp01(newLevel) * 0.38f);
+    feedback = 0.982f - clampedTone * 0.026f;
+
+    std::uint32_t noiseState = 0x9e3779b9u ^ static_cast<std::uint32_t>(size * 2654435761u);
+    for (int sample = 0; sample < size; ++sample) {
+        const float noise = static_cast<float>((nextNoise(noiseState) >> 8) & 0xffffu) / 32767.5f - 1.0f;
+        const float window = 1.0f - static_cast<float>(sample) / static_cast<float>(std::max(1, size));
+        samples[static_cast<std::size_t>(sample)] = noise * window;
+    }
+}
+
+float AstralReverbDelay::KarplusPluck::process()
+{
+    if (level <= 0.00001f || samples.empty() || size <= 1) {
+        return 0.0f;
+    }
+
+    const int nextIndex = (index + 1) % size;
+    const float current = samples[static_cast<std::size_t>(index)];
+    const float next = samples[static_cast<std::size_t>(nextIndex)];
+    samples[static_cast<std::size_t>(index)] = (current + next) * 0.5f * feedback;
+    index = nextIndex;
+    level *= 0.9996f;
+    return current * level;
+}
+
 void AstralReverbDelay::prepare(double newSampleRate, int maximumExpectedBlockSize)
 {
     sampleRate = std::max(1.0, newSampleRate);
@@ -127,6 +195,7 @@ void AstralReverbDelay::prepare(double newSampleRate, int maximumExpectedBlockSi
         reverbLinesLeft[index].prepare(lineSamples);
         reverbLinesRight[index].prepare(lineSamples + 23);
     }
+    reverbTankPluck.prepare(static_cast<int>(sampleRate * 0.03));
 
     reset();
 }
@@ -149,6 +218,7 @@ void AstralReverbDelay::reset()
     for (auto& filter : dampingFiltersRight) {
         filter.reset();
     }
+    reverbTankPluck.reset();
     smoothedDelaySamples = millisecondsToSamples(420.0f, sampleRate);
     wowPhase = 0.0f;
     flutterPhase = 0.0f;
@@ -168,26 +238,47 @@ void AstralReverbDelay::processBlock(
     const int samplesToProcess = std::max(0, input.numSamples);
     const float astroAmount = clamp01(parameters.astroAmount);
     const float astroDepth = parameters.modDepth * astroAmount;
+    const float ariesDrive = signEffect(astroFrame, astro::ZodiacSign::Aries) * astroAmount;
+    const float taurusDamping = signEffect(astroFrame, astro::ZodiacSign::Taurus) * astroAmount;
+    const float geminiTaps = signEffect(astroFrame, astro::ZodiacSign::Gemini) * astroAmount;
+    const float cancerSpace = signEffect(astroFrame, astro::ZodiacSign::Cancer) * astroAmount;
+    const float leoShimmer = signEffect(astroFrame, astro::ZodiacSign::Leo) * astroAmount;
+    const float virgoTone = signEffect(astroFrame, astro::ZodiacSign::Virgo) * astroAmount;
+    const float libraWidth = signEffect(astroFrame, astro::ZodiacSign::Libra) * astroAmount;
+    const float scorpioFeedback = signEffect(astroFrame, astro::ZodiacSign::Scorpio) * astroAmount;
+    const float sagittariusTime = signEffect(astroFrame, astro::ZodiacSign::Sagittarius) * astroAmount;
+    const float capricornRestraint = signEffect(astroFrame, astro::ZodiacSign::Capricorn) * astroAmount;
+    const float aquariusMotion = signEffect(astroFrame, astro::ZodiacSign::Aquarius) * astroAmount;
+    const float piscesWash = signEffect(astroFrame, astro::ZodiacSign::Pisces) * astroAmount;
     const float bloom = astroFrame.feedbackBloom * astroAmount;
-    const float delayDriftMs = astroFrame.delayDrift * 38.0f * astroDepth;
+    const float delayDriftMs = astroFrame.delayDrift * 38.0f * astroDepth + sagittariusTime * 90.0f - capricornRestraint * 36.0f;
     const float targetDelaySamples = millisecondsToSamples(
         std::clamp(parameters.delayTimeMs + delayDriftMs, 40.0f, 2000.0f),
         sampleRate);
-    const float feedback = std::clamp(parameters.feedback + bloom * 0.22f, 0.0f, parameters.freeze ? 0.995f : 0.92f);
+    const float feedback = std::clamp(parameters.feedback + bloom * 0.22f + scorpioFeedback * 0.10f - capricornRestraint * 0.08f, 0.0f, parameters.freeze ? 0.995f : 0.92f);
     const float reverbFeedback = parameters.freeze
         ? 0.998f
-        : std::clamp(0.55f + parameters.space * 0.28f + astroFrame.reverbSize * astroAmount * 0.14f, 0.35f, 0.94f);
-    const float toneCutoff = 700.0f + std::pow(clamp01(parameters.tone), 2.0f) * 11000.0f + astroFrame.shimmer * astroAmount * 3000.0f;
-    const float dampingCutoff = 600.0f + (1.0f - clamp01(astroFrame.damping * astroAmount + (1.0f - parameters.tone) * 0.5f)) * 8500.0f;
+        : std::clamp(0.55f + parameters.space * 0.28f + astroFrame.reverbSize * astroAmount * 0.14f + cancerSpace * 0.06f + piscesWash * 0.05f, 0.35f, 0.96f);
+    const float toneCutoff = 700.0f + std::pow(clamp01(parameters.tone), 2.0f) * 11000.0f + astroFrame.shimmer * astroAmount * 3000.0f + leoShimmer * 3200.0f + virgoTone * 1200.0f;
+    const float dampingCutoff = 600.0f + (1.0f - clamp01(astroFrame.damping * astroAmount + taurusDamping * 0.35f + (1.0f - parameters.tone) * 0.5f)) * 8500.0f;
     const float feedbackCoefficient = onePoleCoefficient(toneCutoff, sampleRate);
     const float dampingCoefficient = onePoleCoefficient(dampingCutoff, sampleRate);
-    const float driveGain = 1.0f + clamp01(parameters.drive) * 5.0f;
-    const float dryGain = equalPowerDry(parameters.mix);
+    const float driveGain = 1.0f + clamp01(parameters.drive) * 5.0f + ariesDrive * 2.5f;
+    // Live input is only passed through when Input Monitor is enabled; mix controls wet effect level.
+    const float dryGain = parameters.inputMonitor ? 1.0f : 0.0f;
     const float wetGain = equalPowerWet(parameters.mix);
     const float delayLevel = clamp01(parameters.delayLevel);
     const float reverbLevel = clamp01(parameters.reverbLevel);
     const float outputGain = std::clamp(parameters.outputGain, 0.0f, 2.0f);
-    const float wowRate = 0.17f * std::max(0.1f, parameters.astroSpeed) + astroFrame.stereoMotion * astroAmount * 0.06f;
+    const float reverbTankTapLevel = clamp01(parameters.reverbTankTapLevel);
+    const float reverbTankTapPan = std::clamp(parameters.reverbTankTapPan, -1.0f, 1.0f);
+    const float reverbTankTapWet = clamp01(parameters.reverbTankTapWet);
+    if (reverbTankTapLevel > 0.0001f) {
+        reverbTankPluck.trigger(reverbTankTapLevel, parameters.reverbTankTapTone, parameters.reverbTankTapFrequencyHz, sampleRate);
+    }
+    const float reverbTankTapLeftGain = std::sqrt(0.5f * (1.0f - reverbTankTapPan));
+    const float reverbTankTapRightGain = std::sqrt(0.5f * (1.0f + reverbTankTapPan));
+    const float wowRate = 0.17f * std::max(0.1f, parameters.astroSpeed) + astroFrame.stereoMotion * astroAmount * 0.06f + aquariusMotion * 0.08f;
     const float flutterRate = 4.7f + astroFrame.delayDrift * astroAmount * 1.2f;
     const float wowIncrement = kTwoPi * wowRate / static_cast<float>(sampleRate);
     const float flutterIncrement = kTwoPi * flutterRate / static_cast<float>(sampleRate);
@@ -201,17 +292,49 @@ void AstralReverbDelay::processBlock(
 
         const float inLeft = sanitize(input.left[sample]);
         const float inRight = sanitize(input.right[sample]);
-        const float delayedLeft = delayLeft.read(modulatedDelay) * 0.62f
+        const float tankTap = reverbTankPluck.process();
+        const float tankTapLeft = tankTap * reverbTankTapLeftGain;
+        const float tankTapRight = tankTap * reverbTankTapRightGain;
+        const float tankTapWetLeft = tankTapLeft * reverbTankTapWet;
+        const float tankTapWetRight = tankTapRight * reverbTankTapWet;
+        const float tankTapDryLeft = tankTapLeft * (1.0f - reverbTankTapWet);
+        const float tankTapDryRight = tankTapRight * (1.0f - reverbTankTapWet);
+        const float effectInputLeft = sanitize(inLeft + tankTapWetLeft);
+        const float effectInputRight = sanitize(inRight + tankTapWetRight);
+        float delayedLeft = delayLeft.read(modulatedDelay) * 0.62f
             + delayLeft.read(modulatedDelay * 0.67f) * 0.25f
             + delayRight.read(modulatedDelay * 1.31f) * 0.18f;
-        const float delayedRight = delayRight.read(modulatedDelay * 1.07f) * 0.62f
+        float delayedRight = delayRight.read(modulatedDelay * 1.07f) * 0.62f
             + delayRight.read(modulatedDelay * 0.71f) * 0.25f
             + delayLeft.read(modulatedDelay * 1.23f) * 0.18f;
 
+        float nodeTapLeft = 0.0f;
+        float nodeTapRight = 0.0f;
+        const float nodeTapAmount = astroDepth * std::clamp(0.25f + astroFrame.delayTapDensity * 0.75f + geminiTaps * 0.35f, 0.0f, 1.25f);
+        for (const auto& tap : astroFrame.delayTaps) {
+            const float tapLevel = std::clamp(tap.level, 0.0f, 1.0f) * nodeTapAmount;
+            if (tapLevel <= 0.0001f) {
+                continue;
+            }
+
+            const float position = std::clamp(tap.position01, 0.0f, 1.0f);
+            const float tapDelay = std::max(1.0f, modulatedDelay * (0.22f + position * 1.88f));
+            const float pan = std::clamp(tap.pan, -1.0f, 1.0f);
+            const float widenedPan = std::clamp(pan * (1.0f + libraWidth * 0.35f), -1.0f, 1.0f);
+            const float leftGain = std::sqrt(0.5f * (1.0f - widenedPan));
+            const float rightGain = std::sqrt(0.5f * (1.0f + widenedPan));
+            const float leftRead = delayLeft.read(tapDelay) * 0.82f + delayRight.read(tapDelay * 1.017f) * 0.18f;
+            const float rightRead = delayRight.read(tapDelay * 1.011f) * 0.82f + delayLeft.read(tapDelay * 0.983f) * 0.18f;
+            nodeTapLeft += leftRead * leftGain * tapLevel;
+            nodeTapRight += rightRead * rightGain * tapLevel;
+        }
+        delayedLeft += nodeTapLeft * 0.34f;
+        delayedRight += nodeTapRight * 0.34f;
+
         const float filteredFeedbackLeft = feedbackFilterLeft.process(delayedLeft, feedbackCoefficient);
         const float filteredFeedbackRight = feedbackFilterRight.process(delayedRight, feedbackCoefficient);
-        const float writeLeft = parameters.freeze ? filteredFeedbackLeft : inLeft + filteredFeedbackLeft * feedback;
-        const float writeRight = parameters.freeze ? filteredFeedbackRight : inRight + filteredFeedbackRight * feedback;
+        const float writeLeft = parameters.freeze ? filteredFeedbackLeft : effectInputLeft + filteredFeedbackLeft * feedback;
+        const float writeRight = parameters.freeze ? filteredFeedbackRight : effectInputRight + filteredFeedbackRight * feedback;
 
         delayLeft.write(softClip(writeLeft * driveGain) / driveGain);
         delayRight.write(softClip(writeRight * driveGain) / driveGain);
@@ -221,18 +344,18 @@ void AstralReverbDelay::processBlock(
         float reverbLeft = 0.0f;
         float reverbRight = 0.0f;
         processReverbSample(
-            inLeft * 0.35f + delayedLeft * 0.45f,
-            inRight * 0.35f + delayedRight * 0.45f,
+            effectInputLeft * 0.35f + delayedLeft * 0.45f,
+            effectInputRight * 0.35f + delayedRight * 0.45f,
             reverbFeedback,
             dampingCoefficient,
-            astroFrame.stereoMotion * astroAmount,
+            std::clamp(astroFrame.stereoMotion * astroAmount + libraWidth * 0.18f + aquariusMotion * 0.16f, 0.0f, 1.0f),
             reverbLeft,
             reverbRight);
 
         const float wetLeft = delayedLeft * delayLevel + reverbLeft * reverbLevel;
         const float wetRight = delayedRight * delayLevel + reverbRight * reverbLevel;
-        output.left[sample] = sanitize((inLeft * dryGain + wetLeft * wetGain) * outputGain);
-        output.right[sample] = sanitize((inRight * dryGain + wetRight * wetGain) * outputGain);
+        output.left[sample] = sanitize((inLeft * dryGain + tankTapDryLeft + wetLeft * wetGain) * outputGain);
+        output.right[sample] = sanitize((inRight * dryGain + tankTapDryRight + wetRight * wetGain) * outputGain);
 
         advanceWrapped(wowPhase, wowIncrement);
         advanceWrapped(flutterPhase, flutterIncrement);
@@ -288,4 +411,3 @@ void AstralReverbDelay::processReverbSample(
 }
 
 } // namespace astral::dsp
-

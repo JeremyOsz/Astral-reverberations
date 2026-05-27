@@ -33,6 +33,9 @@ void runAstroTests()
     require(frame.damping >= 0.0f && frame.damping <= 1.0f, "damping is bounded");
     require(frame.shimmer >= 0.0f && frame.shimmer <= 1.0f, "shimmer is bounded");
     require(frame.stereoMotion >= 0.0f && frame.stereoMotion <= 1.0f, "stereo motion is bounded");
+    for (float signEffect : frame.signEffects) {
+        require(signEffect >= 0.0f && signEffect <= 1.0f, "sign effect control is bounded");
+    }
 
     const auto droneFrame = mapper.mapDroneSnapshot(first);
     for (const auto& layer : droneFrame.layers) {
@@ -42,7 +45,15 @@ void runAstroTests()
         require(layer.detuneCents >= -50.0f && layer.detuneCents <= 50.0f, "drone detune is bounded");
         require(layer.pan >= -1.0f && layer.pan <= 1.0f, "drone pan is bounded");
         require(layer.tapePosition >= 0.0f && layer.tapePosition <= 1.0f, "drone tape position is bounded");
+        require(std::isfinite(layer.tailSeconds), "orbit tail length is finite");
+        require(layer.tailSeconds >= 1.0f && layer.tailSeconds <= 20.0f, "orbit tail length is musically bounded");
     }
+    require(droneFrame.layers[static_cast<std::size_t>(PlanetId::Moon)].tailSeconds
+            < droneFrame.layers[static_cast<std::size_t>(PlanetId::Mercury)].tailSeconds,
+        "shorter lunar orbit maps to shorter tail than Mercury");
+    require(droneFrame.layers[static_cast<std::size_t>(PlanetId::Jupiter)].tailSeconds
+            < droneFrame.layers[static_cast<std::size_t>(PlanetId::Pluto)].tailSeconds,
+        "longer Pluto orbit maps to longer tail than Jupiter");
     require(droneFrame.rootReinforcement >= 0.0f && droneFrame.rootReinforcement <= 1.0f, "root reinforcement is bounded");
     require(droneFrame.consonantBloom >= 0.0f && droneFrame.consonantBloom <= 1.0f, "consonant bloom is bounded");
     require(droneFrame.tensionBeating >= 0.0f && droneFrame.tensionBeating <= 1.0f, "tension beating is bounded");
@@ -53,4 +64,8 @@ void runAstroTests()
         secondDroneFrame.layers[static_cast<std::size_t>(PlanetId::Jupiter)].ratio,
         0.0001f,
         "drone mapping is deterministic");
+    requireNear(droneFrame.layers[static_cast<std::size_t>(PlanetId::Pluto)].tailSeconds,
+        secondDroneFrame.layers[static_cast<std::size_t>(PlanetId::Pluto)].tailSeconds,
+        0.0001f,
+        "orbit tail mapping is deterministic");
 }

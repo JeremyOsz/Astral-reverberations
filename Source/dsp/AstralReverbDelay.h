@@ -20,7 +20,15 @@ struct AstralParameters {
     float drive = 0.15f;
     float astroAmount = 0.5f;
     float astroSpeed = 1.0f;
+    float reverbTankTapLevel = 0.0f;
+    float reverbTankTapPan = 0.0f;
+    float reverbTankTapTone = 0.45f;
+    float reverbTankTapFrequencyHz = 220.0f;
+    float reverbTankTapWet = 1.0f;
+    float pluckLevel = 1.0f;
+    float pluckTimbre = 0.5f;
     bool freeze = false;
+    bool inputMonitor = false;
     float outputGain = 1.0f;
 };
 
@@ -30,10 +38,14 @@ struct StereoBufferView {
     int numSamples = 0;
 };
 
+/// Stereo delay/reverb core that applies astro-derived modulation, node taps, and sign effects.
 class AstralReverbDelay {
 public:
+    /// Allocates delay/reverb storage for a sample rate and maximum expected block size.
     void prepare(double newSampleRate, int maximumExpectedBlockSize);
+    /// Clears all delay, reverb, filter, and modulation state.
     void reset();
+    /// Processes a stereo block from input to output using normal parameters plus astro modulation.
     void processBlock(
         const StereoBufferView& input,
         const StereoBufferView& output,
@@ -45,18 +57,38 @@ private:
         std::vector<float> samples;
         int writeIndex = 0;
 
+        /// Allocates a circular delay line with at least two samples.
         void prepare(int sampleCount);
+        /// Clears stored samples and returns the write head to the start.
         void reset();
+        /// Reads a fractional delay in samples using linear interpolation.
         float read(float delaySamples) const;
+        /// Writes one sanitized sample at the current write head.
         void write(float value);
+        /// Advances the circular write head by one sample.
         void advance();
     };
 
     struct OnePoleLowPass {
         float state = 0.0f;
 
+        /// Clears the filter state.
         void reset();
+        /// Processes one sample using a normalized one-pole coefficient.
         float process(float input, float coefficient);
+    };
+
+    struct KarplusPluck {
+        std::vector<float> samples;
+        int size = 0;
+        int index = 0;
+        float level = 0.0f;
+        float feedback = 0.0f;
+
+        void prepare(int maxSamples);
+        void reset();
+        void trigger(float newLevel, float tone, float frequencyHz, double sampleRate);
+        float process();
     };
 
     static constexpr int kReverbLineCount = 4;
@@ -71,11 +103,13 @@ private:
     OnePoleLowPass feedbackFilterRight;
     std::array<OnePoleLowPass, kReverbLineCount> dampingFiltersLeft;
     std::array<OnePoleLowPass, kReverbLineCount> dampingFiltersRight;
+    KarplusPluck reverbTankPluck;
     float smoothedDelaySamples = 1.0f;
     float wowPhase = 0.0f;
     float flutterPhase = 0.0f;
     float reverbModPhase = 0.0f;
 
+    /// Processes the internal four-line reverb network for one stereo sample.
     void processReverbSample(
         float inputLeft,
         float inputRight,
@@ -87,4 +121,3 @@ private:
 };
 
 } // namespace astral::dsp
-

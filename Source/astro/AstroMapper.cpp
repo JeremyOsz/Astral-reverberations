@@ -34,11 +34,13 @@ float sin01(float degrees)
     return 0.5f + 0.5f * std::sin(degrees * kTwoPi / 360.0f);
 }
 
+// Fetches a planet longitude by enum index from the fixed-size snapshot array.
 float planetValue(const AstroSnapshot& snapshot, PlanetId planet)
 {
     return snapshot.planets[static_cast<std::size_t>(planet)].longitudeDegrees;
 }
 
+// Folds very large orbital ratios into a musically usable drone register.
 float foldRatioToDroneRange(float ratio)
 {
     if (!std::isfinite(ratio) || ratio <= 0.0f) {
@@ -54,6 +56,23 @@ float foldRatioToDroneRange(float ratio)
     return std::clamp(ratio, 0.25f, 8.0f);
 }
 
+// Log-maps orbital periods into practical Sarum-style reverb tail lengths.
+float orbitPeriodToTailSeconds(float periodDays)
+{
+    constexpr float kMinimumTailSeconds = 1.5f;
+    constexpr float kMaximumTailSeconds = 18.0f;
+    constexpr float kMinimumPeriodDays = 27.3217f;
+    constexpr float kMaximumPeriodDays = 90560.0f;
+
+    const float safePeriod = std::clamp(periodDays, kMinimumPeriodDays, kMaximumPeriodDays);
+    const float normalized = (std::log(safePeriod) - std::log(kMinimumPeriodDays))
+        / (std::log(kMaximumPeriodDays) - std::log(kMinimumPeriodDays));
+    return std::clamp(kMinimumTailSeconds + normalized * (kMaximumTailSeconds - kMinimumTailSeconds),
+        kMinimumTailSeconds,
+        kMaximumTailSeconds);
+}
+
+// Returns the ideal angular distance for a supported aspect type.
 float aspectAngle(AspectType type)
 {
     switch (type) {
@@ -66,6 +85,7 @@ float aspectAngle(AspectType type)
     return 0.0f;
 }
 
+// Weights aspects that should add beating, split, or tension.
 float hardAspectEnergy(AspectType type)
 {
     switch (type) {
@@ -80,6 +100,7 @@ float hardAspectEnergy(AspectType type)
     return 0.0f;
 }
 
+// Weights aspects that should add consonant bloom.
 float softAspectEnergy(AspectType type)
 {
     switch (type) {
@@ -100,6 +121,7 @@ AstroModulationFrame AstroMapper::mapSnapshot(const AstroSnapshot& snapshot) con
 {
     float hardEnergy = 0.0f;
     float softEnergy = 0.0f;
+    std::array<float, 12> signWeights{};
     for (const auto& aspect : snapshot.aspects) {
         hardEnergy += hardAspectEnergy(aspect.type) * aspect.strength01;
         softEnergy += softAspectEnergy(aspect.type) * aspect.strength01;
@@ -138,12 +160,41 @@ AstroModulationFrame AstroMapper::mapSnapshot(const AstroSnapshot& snapshot) con
     }
 
     AstroModulationFrame frame;
+    for (std::size_t index = 0; index < snapshot.planets.size(); ++index) {
+        const auto sign = AstrologyEngine::signForLongitude(snapshot.planets[index].longitudeDegrees);
+        signWeights[static_cast<std::size_t>(sign)] += kLayerWeights[index];
+    }
+    for (std::size_t index = 0; index < frame.signEffects.size(); ++index) {
+        frame.signEffects[index] = std::clamp(signWeights[index] / 1.6f, 0.0f, 1.0f);
+    }
+
     frame.delayDrift = std::clamp((mercury - 0.5f) * 2.0f + qualityMotion, -1.0f, 1.0f);
     frame.feedbackBloom = std::clamp(0.22f + hardEnergy * 0.55f + mars * 0.16f - saturn * 0.18f, 0.0f, 1.0f);
     frame.reverbSize = std::clamp(0.35f + venus * 0.22f + jupiter * 0.28f + softEnergy * 0.20f, 0.0f, 1.0f);
     frame.damping = std::clamp(0.35f + saturn * 0.35f - venus * 0.12f - elementTone, 0.0f, 1.0f);
     frame.shimmer = std::clamp(neptune * 0.45f + jupiter * 0.20f + softEnergy * 0.25f + elementTone, 0.0f, 1.0f);
     frame.stereoMotion = std::clamp(0.20f + uranus * 0.38f + pluto * 0.18f + qualityMotion + softEnergy * 0.10f, 0.0f, 1.0f);
+    frame.delayTapDensity = std::clamp(0.18f + hardEnergy * 0.36f + softEnergy * 0.26f, 0.0f, 1.0f);
+
+    for (std::size_t index = 0; index < frame.delayTaps.size(); ++index) {
+        const auto& position = snapshot.planets[index];
+        const float longitude = position.longitudeDegrees;
+        const float longitudePhase = sin01(longitude);
+        frame.delayTaps[index] = {
+            std::clamp(longitude / 360.0f, 0.0f, 1.0f),
+            std::clamp(kLayerWeights[index] * (0.35f + longitudePhase * 0.55f), 0.0f, 1.0f),
+            std::clamp(std::sin(longitude * kTwoPi / 180.0f) * 0.82f, -1.0f, 1.0f)
+        };
+    }
+
+    for (const auto& aspect : snapshot.aspects) {
+        const auto a = static_cast<std::size_t>(aspect.a);
+        const auto b = static_cast<std::size_t>(aspect.b);
+        const float boost = std::clamp(aspect.strength01 * 0.18f, 0.0f, 0.24f);
+        frame.delayTaps[a].level = std::clamp(frame.delayTaps[a].level + boost, 0.0f, 1.0f);
+        frame.delayTaps[b].level = std::clamp(frame.delayTaps[b].level + boost, 0.0f, 1.0f);
+    }
+
     return frame;
 }
 
@@ -200,7 +251,8 @@ AstroDroneFrame AstroMapper::mapDroneSnapshot(const AstroSnapshot& snapshot) con
             std::clamp((longitudePhase - 0.5f) * 34.0f + retrogradePull, -50.0f, 50.0f),
             std::clamp(signPan * 0.75f, -1.0f, 1.0f),
             std::clamp(longitude / 360.0f, 0.0f, 1.0f),
-            std::clamp(std::abs(position.speed) / 14.0f, 0.0f, 1.0f)
+            std::clamp(std::abs(position.speed) / 14.0f, 0.0f, 1.0f),
+            orbitPeriodToTailSeconds(kOrbitalPeriodsDays[index])
         };
     }
 

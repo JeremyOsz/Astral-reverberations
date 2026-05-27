@@ -6,12 +6,14 @@
 #include "dsp/PlanetaryDrone.h"
 
 #include <array>
+#include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 namespace astral::plugin {
 
 class AstralReverberationsAudioProcessor final : public juce::AudioProcessor {
 public:
+    /// Selects the base orbit source before per-planet longitude offsets are applied.
     enum class AstroMode {
         Now = 0,
         ManualDate,
@@ -21,11 +23,16 @@ public:
     AstralReverberationsAudioProcessor();
     ~AstralReverberationsAudioProcessor() override = default;
 
+    /// Prepares the DSP engines and scratch buffers for playback.
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    /// Clears DSP resources and state when playback stops.
     void releaseResources() override;
+    /// Restricts the plugin to matching stereo input and stereo output.
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
+    /// Processes one audio/MIDI block through drone, capture, delay, and reverb.
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
 
+    /// Creates the Orbit Harmony editor.
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
@@ -41,23 +48,68 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
+    /// Serializes APVTS parameters and orbit mode/date state.
     void getStateInformation(juce::MemoryBlock& destData) override;
+    /// Restores APVTS parameters and orbit mode/date state from host state.
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& parameters() { return parameterState; }
     const juce::AudioProcessorValueTreeState& parameters() const { return parameterState; }
 
+    /// Returns the active orbit source mode.
     AstroMode getAstroMode() const;
+    /// Sets the orbit source mode used by the next audio block.
     void setAstroMode(AstroMode mode);
+    /// Returns the fixed Julian day used by Manual Date mode.
     double getManualJulianDay() const;
+    /// Sets the fixed Julian day used by Manual Date mode.
     void setManualJulianDay(double julianDay);
-    const astro::AstroSnapshot& getCurrentSnapshot() const { return currentSnapshot; }
-    const astro::AstroDroneFrame& getCurrentDroneFrame() const { return currentDroneFrame; }
+    /// Returns a lock-protected copy of the latest UI-visible orbit snapshot.
+    astro::AstroSnapshot getCurrentSnapshotCopy() const;
+    /// Returns a lock-protected copy of the latest UI-visible drone mapping.
+    astro::AstroDroneFrame getCurrentDroneFrameCopy() const;
+    /// Returns true when MIDI or the Drone On parameter is opening the drone gate.
     bool isDroneGateOpen() const;
+    /// Returns true when the manual Drone On parameter is active.
     bool isDroneHeld() const;
-    int getDroneRootNote() const { return currentRootMidiNote; }
+    /// Returns true when the UI root should ignore incoming MIDI notes.
+    bool isManualRootLocked() const;
+    /// Returns the effective MIDI root note before transposition.
+    int getDroneRootNote() const;
+    /// Sets a per-planet longitude offset relative to the active orbit source.
     void setManualPlanetLongitude(astro::PlanetId planet, float longitudeDegrees);
+    /// Clears one planet's longitude offset.
+    void resetPlanetLongitude(astro::PlanetId planet);
+    /// Clears all planet longitude offsets.
+    void resetPlanetLongitudes();
+    /// Returns true when a planet currently has a user offset.
+    bool hasPlanetLongitudeOffset(astro::PlanetId planet) const;
+    /// Opens or closes the momentary keyboard gate for one planet tail.
+    void setManualOrbitTailGate(astro::PlanetId planet, bool active);
+    /// Queues a one-shot excitation into the main reverb tank from an orbit-ring click.
+    void tapOrbitReverbTank(astro::PlanetId planet);
+    /// Returns true when a planet tail key is held and the planet is not muted.
+    bool isManualOrbitTailActive(astro::PlanetId planet) const;
+    /// Returns the latest smoothed captured-tail level for a planet.
+    float getOrbitTailLevel(astro::PlanetId planet) const;
+    /// Toggles a planet layer across drone, capture, and node-tap contribution.
+    void togglePlanetMute(astro::PlanetId planet);
+    /// Returns true when a planet layer is muted.
+    bool isPlanetMuted(astro::PlanetId planet) const;
+    /// Returns a smoothed input peak meter in the range 0..1.
+    float getInputLevel() const;
+    /// Returns a smoothed post-effect output peak meter in the range 0..1.
+    float getOutputLevel() const;
+    /// Returns whether a zodiac sign effect marker is active.
+    bool isSignEffectEnabled(astro::ZodiacSign sign) const;
+    /// Toggles one zodiac sign effect marker.
+    void toggleSignEffect(astro::ZodiacSign sign);
+    /// Advances one sign marker to the next assignable effect role.
+    void cycleSignEffect(astro::ZodiacSign sign);
+    /// Returns the current effect role assigned to a sign marker.
+    int getSignEffectAssignment(astro::ZodiacSign sign) const;
 
+    /// Builds the complete APVTS parameter layout for plugin state and automation.
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
@@ -67,21 +119,47 @@ private:
     astro::AstrologyEngine astrologyEngine;
     astro::AstroMapper astroMapper;
     astro::AstroSnapshot currentSnapshot;
-    astro::AstroSnapshot manualSnapshot;
     astro::AstroDroneFrame currentDroneFrame;
+    mutable juce::CriticalSection astroStateLock;
     juce::AudioBuffer<float> processingBuffer;
+    juce::AudioBuffer<float> inputCopyBuffer;
     std::array<bool, 128> heldMidiNotes{};
+    std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> manualOrbitTailGates{};
+    std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> planetMutes{};
+    std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> orbitTailLevels{};
+    std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> planetLongitudeOffsets{};
+    std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> planetLongitudeOffsetEnabled{};
+    std::array<std::atomic<bool>, 12> signEffectEnabled{};
+    std::array<std::atomic<int>, 12> signEffectAssignments{};
+    std::atomic<int> pendingReverbTankTaps{0};
+    std::atomic<float> pendingReverbTankTapPan{0.0f};
+    std::atomic<float> pendingReverbTankTapTone{0.45f};
+    std::atomic<float> pendingReverbTankTapFrequencyHz{220.0f};
+    std::atomic<float> pendingReverbTankTapWet{1.0f};
+    std::atomic<float> inputLevel{0.0f};
+    std::atomic<float> outputLevel{0.0f};
+    std::array<int, static_cast<std::size_t>(astro::PlanetId::Count)> euclideanSteps{};
     double simulatedJulianDay = astro::AstrologyEngine::J2000JulianDay;
     double manualJulianDay = astro::AstrologyEngine::J2000JulianDay;
     double currentSampleRate = 44100.0;
-    bool hasManualSnapshot = false;
+    double euclideanStepAccumulator = 0.0;
     bool droneGateOpen = false;
-    int currentRootMidiNote = 45;
+    int currentMidiRootNote = 45;
 
+    /// Reads APVTS effect parameters into the JUCE-free delay/reverb parameter struct.
     dsp::AstralParameters readParameters() const;
+    /// Reads APVTS and UI state into the JUCE-free drone parameter struct.
     dsp::PlanetaryDroneParameters readDroneParameters() const;
+    /// Advances or reads the active orbit source and maps it into modulation frames.
     astro::AstroModulationFrame nextAstroFrame(int samplesInBlock);
+    /// Tracks held MIDI notes and chooses the current MIDI root.
     void updateMidiGate(const juce::MidiBuffer& midiMessages);
+    /// Applies user longitude offsets to a freshly generated orbit snapshot.
+    void applyPlanetLongitudeOffsets(astro::AstroSnapshot& snapshot) const;
+    /// Advances the planet-position Euclidean pluck sequencer.
+    void processEuclideanPlucks(int samplesInBlock, const astro::AstroDroneFrame& droneFrame);
+    /// Queues a pluck tap using one mapped planet harmonic layer.
+    void queueReverbTankTap(std::size_t planetIndex, const astro::AstroHarmonicLayer& layer, float wetAmount);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AstralReverberationsAudioProcessor)
 };

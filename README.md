@@ -12,6 +12,10 @@ The astrology engine is intentionally offline. It uses approximate orbital perio
 - `tests`: portable C++ tests for the core engine.
 - `docs`: learning notes and porting plans for Max/RNBO, VCV Rack, and Versio/Daisy.
 
+## Capture
+
+Capture is an armed input-recording mode. For audible orbit-tail capture, turn on `Capture` and hold a planet number key (`1-0`) while audio is entering the plugin. See `docs/capture-workflow.md` for the full signal path and troubleshooting notes.
+
 ## Build The Core Tests
 
 The core tests do not need JUCE or network access:
@@ -39,8 +43,8 @@ Start with:
 
 1. `docs/learning/vst-basics.md`
 2. `docs/astro-mapping.md`
-3. `docs/dsp-design.md`
-4. `Source/astro/AstrologyEngine.cpp`
-5. `Source/dsp/AstralReverbDelay.cpp`
-6. `Source/plugin/PluginProcessor.cpp`
-
+3. `docs/capture-workflow.md`
+4. `docs/dsp-design.md`
+5. `Source/astro/AstrologyEngine.cpp`
+6. `Source/dsp/AstralReverbDelay.cpp`
+7. `Source/plugin/PluginProcessor.cpp`

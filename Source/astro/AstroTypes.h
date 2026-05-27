@@ -79,12 +79,21 @@ struct AstroSnapshot {
 };
 
 struct AstroModulationFrame {
+    struct DelayTap {
+        float position01{};
+        float level{};
+        float pan{};
+    };
+
     float delayDrift{};
     float feedbackBloom{};
     float reverbSize{};
     float damping{};
     float shimmer{};
     float stereoMotion{};
+    std::array<DelayTap, static_cast<std::size_t>(PlanetId::Count)> delayTaps{};
+    float delayTapDensity{};
+    std::array<float, 12> signEffects{};
 };
 
 struct AstroHarmonicLayer {
@@ -95,6 +104,7 @@ struct AstroHarmonicLayer {
     float pan{};
     float tapePosition{};
     float driftRate{};
+    float tailSeconds = 1.0f;
 };
 
 struct AstroDroneFrame {
@@ -106,10 +116,15 @@ struct AstroDroneFrame {
     float aspectTapDensity{};
 };
 
+/// Returns a stable display name for a planet id.
 std::string_view toString(PlanetId planet);
+/// Returns a stable display name for an aspect type.
 std::string_view toString(AspectType aspect);
+/// Returns a stable display name for a zodiac sign.
 std::string_view toString(ZodiacSign sign);
+/// Returns a stable display name for an element.
 std::string_view toString(Element element);
+/// Returns a stable display name for a quality.
 std::string_view toString(Quality quality);
 
 } // namespace astral::astro

@@ -48,6 +48,10 @@ if (ASTRAL_BUILD_PLUGIN)
 
     FetchContent_MakeAvailable(JUCE)
 
+    juce_add_binary_data(AstralReverberationsAssets
+        SOURCES
+            assets/astral-orbit-texture.png)
+
     juce_add_plugin(AstralReverberationsPlugin
         COMPANY_NAME "Astral Reverberations"
         PRODUCT_NAME "Astral Reverberations"
@@ -59,7 +63,9 @@ if (ASTRAL_BUILD_PLUGIN)
         NEEDS_MIDI_INPUT TRUE
         NEEDS_MIDI_OUTPUT FALSE
         IS_MIDI_EFFECT FALSE
-        EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "Astral Reverberations needs audio input for capture, orbit tails, and live delay/reverb processing."
+        EDITOR_WANTS_KEYBOARD_FOCUS TRUE
         COPY_PLUGIN_AFTER_BUILD FALSE)
 
     target_sources(AstralReverberationsPlugin
@@ -70,6 +76,7 @@ if (ASTRAL_BUILD_PLUGIN)
     target_link_libraries(AstralReverberationsPlugin
         PRIVATE
             AstralCore
+            AstralReverberationsAssets
             juce::juce_audio_utils
             juce::juce_dsp
         PUBLIC

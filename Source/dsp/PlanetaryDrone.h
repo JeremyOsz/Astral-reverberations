@@ -9,6 +9,8 @@
 namespace astral::dsp {
 
 struct PlanetaryDroneParameters {
+    static constexpr std::size_t kManualLayerCount = static_cast<std::size_t>(astro::PlanetId::Count);
+
     float droneLevel = 0.0f;
     float captureLevel = 0.0f;
     float harmonicSpread = 0.65f;
@@ -16,42 +18,73 @@ struct PlanetaryDroneParameters {
     float rootFrequencyHz = 110.0f;
     bool gate = false;
     bool captureEnabled = false;
+    std::array<bool, kManualLayerCount> manualLayerGates{};
+    std::array<bool, kManualLayerCount> mutedLayers{};
 };
 
+/// Planetary harmonic drone plus captured input scan and orbit-tail buffers.
 class PlanetaryDrone {
 public:
+    static constexpr std::size_t kLayerCount = static_cast<std::size_t>(astro::PlanetId::Count);
+
+    /// Allocates capture and tail buffers for the active sample rate.
     void prepare(double newSampleRate, int maximumExpectedBlockSize);
+    /// Clears oscillator phases, capture storage, tail buffers, meters, and gate state.
     void reset();
+    /// Clears only the short captured-input scan buffer.
     void resetCapture();
 
+    /// Renders drone oscillators, captured buffer scan, and keyed orbit tails into the output buffer.
     void processBlock(
         const StereoBufferView& input,
         const StereoBufferView& output,
         const PlanetaryDroneParameters& parameters,
         const astro::AstroDroneFrame& frame);
+    /// Returns smoothed per-planet tail energy for UI feedback.
+    std::array<float, kLayerCount> getTailLevels() const { return tailLevels; }
 
 private:
-    static constexpr std::size_t kLayerCount = static_cast<std::size_t>(astro::PlanetId::Count);
-
     struct CaptureBuffer {
         std::vector<float> left;
         std::vector<float> right;
         int writeIndex = 0;
         bool hasSignal = false;
 
+        /// Allocates the circular capture buffer.
         void prepare(int sampleCount);
+        /// Clears captured audio and signal state.
         void reset();
+        /// Writes one stereo input sample into the circular buffer.
         void write(float leftSample, float rightSample);
+        /// Reads the left channel at a normalized tape-head position.
         float readLeft(float position01) const;
+        /// Reads the right channel at a normalized tape-head position.
         float readRight(float position01) const;
+    };
+
+    struct ManualTailBuffer {
+        std::vector<float> left;
+        std::vector<float> right;
+        int writeIndex = 0;
+        float envelope = 0.0f;
+
+        /// Allocates the per-planet feedback tail buffer.
+        void prepare(int sampleCount);
+        /// Clears buffered tail audio and envelope state.
+        void reset();
+        /// Processes one sample of a keyed orbit tail and returns left output, writing right output by reference.
+        float process(float inputLeft, float inputRight, float tailSeconds, float level, float pan, bool active, float& rightOut, double sampleRate);
     };
 
     double sampleRate = 44100.0;
     std::array<float, kLayerCount> phases{};
     std::array<float, kLayerCount> beatPhases{};
+    std::array<float, kLayerCount> tailLevels{};
+    std::array<ManualTailBuffer, kLayerCount> manualTails{};
     CaptureBuffer capture;
     float gateEnvelope = 0.0f;
 
+    /// Reads from any float buffer using linear interpolation.
     static float readInterpolated(const std::vector<float>& buffer, float index);
 };
 

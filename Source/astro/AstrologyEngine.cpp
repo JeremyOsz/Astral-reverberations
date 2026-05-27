@@ -11,6 +11,7 @@ constexpr float kFullCircle = 360.0f;
 constexpr double kUnixEpochJulianDay = 2440587.5;
 constexpr double kSecondsPerDay = 86400.0;
 
+// Static approximation of one planet's musical orbit model.
 struct OrbitSpec {
     PlanetId planet;
     double periodDays;
@@ -31,6 +32,7 @@ constexpr std::array<OrbitSpec, static_cast<std::size_t>(PlanetId::Count)> kOrbi
     {PlanetId::Pluto, 90560.0, 238.93f, 1.0f},
 }};
 
+// Defines one aspect target and the orb allowed around it.
 struct AspectSpec {
     AspectType type;
     float angle;
@@ -45,6 +47,7 @@ constexpr std::array<AspectSpec, 5> kAspectSpecs{{
     {AspectType::Opposition, 180.0f, 8.0f},
 }};
 
+// Adds a deterministic speed wobble so simulated orbits can enter retrograde-feeling spans.
 float retrogradeWobble(double daysSinceJ2000, const OrbitSpec& spec)
 {
     // This is a musical approximation, not an astronomy model. Inner planets
@@ -249,4 +252,3 @@ std::string_view toString(Quality quality)
 }
 
 } // namespace astral::astro
-
