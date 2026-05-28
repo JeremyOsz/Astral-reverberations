@@ -15,6 +15,10 @@ struct AstralParameters {
     float feedback = 0.42f;
     float space = 0.55f;
     float tone = 0.55f;
+    float reverbDecay = 0.5f;
+    float reverbDamping = 0.5f;
+    float reverbModDepth = 0.35f;
+    float pluckSend = 1.0f;
     float modDepth = 0.35f;
     float wowFlutter = 0.25f;
     float drive = 0.15f;
@@ -29,6 +33,9 @@ struct AstralParameters {
     float pluckTimbre = 0.5f;
     bool freeze = false;
     bool inputMonitor = false;
+    float eqLowGainDb = 0.0f;
+    float eqMidGainDb = 0.0f;
+    float eqHighGainDb = 0.0f;
     float outputGain = 1.0f;
 };
 
@@ -103,6 +110,10 @@ private:
     OnePoleLowPass feedbackFilterRight;
     std::array<OnePoleLowPass, kReverbLineCount> dampingFiltersLeft;
     std::array<OnePoleLowPass, kReverbLineCount> dampingFiltersRight;
+    OnePoleLowPass masterLowLeft;
+    OnePoleLowPass masterLowRight;
+    OnePoleLowPass masterHighLeft;
+    OnePoleLowPass masterHighRight;
     KarplusPluck reverbTankPluck;
     float smoothedDelaySamples = 1.0f;
     float wowPhase = 0.0f;

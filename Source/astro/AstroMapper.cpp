@@ -56,17 +56,15 @@ float foldRatioToDroneRange(float ratio)
     return std::clamp(ratio, 0.25f, 8.0f);
 }
 
-// Log-maps orbital periods into practical Sarum-style reverb tail lengths.
-float orbitPeriodToTailSeconds(float periodDays)
+// Maps the 1-0 planet keys into progressively longer Sarum-style reverb holds.
+float sarumTailSecondsForIndex(std::size_t index)
 {
     constexpr float kMinimumTailSeconds = 1.5f;
     constexpr float kMaximumTailSeconds = 18.0f;
-    constexpr float kMinimumPeriodDays = 27.3217f;
-    constexpr float kMaximumPeriodDays = 90560.0f;
-
-    const float safePeriod = std::clamp(periodDays, kMinimumPeriodDays, kMaximumPeriodDays);
-    const float normalized = (std::log(safePeriod) - std::log(kMinimumPeriodDays))
-        / (std::log(kMaximumPeriodDays) - std::log(kMinimumPeriodDays));
+    constexpr float kCurve = 1.72f;
+    const float normalized = std::pow(
+        std::clamp(static_cast<float>(index) / static_cast<float>(static_cast<std::size_t>(PlanetId::Count) - 1), 0.0f, 1.0f),
+        kCurve);
     return std::clamp(kMinimumTailSeconds + normalized * (kMaximumTailSeconds - kMinimumTailSeconds),
         kMinimumTailSeconds,
         kMaximumTailSeconds);
@@ -252,7 +250,7 @@ AstroDroneFrame AstroMapper::mapDroneSnapshot(const AstroSnapshot& snapshot) con
             std::clamp(signPan * 0.75f, -1.0f, 1.0f),
             std::clamp(longitude / 360.0f, 0.0f, 1.0f),
             std::clamp(std::abs(position.speed) / 14.0f, 0.0f, 1.0f),
-            orbitPeriodToTailSeconds(kOrbitalPeriodsDays[index])
+            sarumTailSecondsForIndex(index)
         };
     }
 

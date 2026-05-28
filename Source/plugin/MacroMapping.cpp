@@ -44,10 +44,8 @@ ResolvedMacroParameters resolveMacroParameters(const MacroControls& macros)
     resolved.captureLevel = lerp(0.04f, 0.88f, mneme);
     resolved.delayLevel = std::clamp(resolved.delayLevel + mneme * 0.12f, 0.0f, 1.0f);
 
-    resolved.droneLevel = lerp(0.08f, 0.82f, choir);
     resolved.harmonicSpread = lerp(0.30f, 0.92f, choir);
     resolved.aspectDepth = lerp(0.16f, 0.84f, choir);
-    resolved.pluckLevel = lerp(0.35f, 1.35f, choir);
 
     resolved.astroAmount = lerp(0.02f, 0.96f, ephemeris);
     resolved.modDepth = lerp(0.06f, 0.78f, ephemeris);

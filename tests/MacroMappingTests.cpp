@@ -22,7 +22,7 @@ void runMacroMappingTests()
 
     requireNear(resolved.mix, 0.35f, 0.08f, "default substance maps near legacy wet mix");
     requireNear(resolved.captureLevel, 0.35f, 0.08f, "default mneme maps near legacy capture level");
-    requireNear(resolved.droneLevel, 0.45f, 0.10f, "default choir maps near legacy drone level");
+    requireNear(resolved.harmonicSpread, 0.65f, 0.10f, "default choir maps near legacy harmonic spread");
     requireNear(resolved.rootOffsetSemitones, 0.0f, 0.5f, "centered root macro is near zero semitones");
 
     astral::plugin::MacroControls hotMneme = defaults;

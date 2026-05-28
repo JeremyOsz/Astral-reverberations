@@ -80,7 +80,9 @@ All parameters are exposed through JUCE **APVTS** (`createParameterLayout()`). A
 |----|----------|------|
 | `macro_substance` | Substance | Wet mix, echo/reverb levels, output level (via macro resolver) |
 | `macro_mneme` | Mneme | Capture level, feedback safety |
-| `macro_choir` | Choir | Drone level, harmonics, pluck level |
+| `macro_choir` | Choir | Harmonic spread and aspect bloom |
+| `drone_level` | Drone | Planetary oscillator level (0-1.5x) |
+| `pluck_level` | Pluck | Karplus ring pluck level (0-1.5x) |
 | `macro_ephemeris` | Ephemeris | Astro modulation depth |
 | `macro_fate` | Fate | Delay time, feedback, wow, drive |
 | `macro_void` | Void | Space, tone, reverb emphasis |
@@ -91,6 +93,7 @@ All parameters are exposed through JUCE **APVTS** (`createParameterLayout()`). A
 | `euclid_wet` | Wet | Pluck send level |
 | `drone_hold` | Drone On | Gate without MIDI |
 | `capture_enable` | Capture | Arms capture buffers |
+| `organ_mode` | Organ | A-; row gates planets instead of mute |
 | `root_note` | Root (combo) | Manual root MIDI note 24–84 |
 | `root_lock` | Manual Root | Ignore MIDI for root |
 | `freeze` | Freeze | Main delay/reverb freeze |
@@ -103,7 +106,7 @@ Macro → DSP mapping detail: `Source/plugin/MacroMapping.cpp` and `docs/dsp-des
 
 These exist for preset compatibility / future use. **MIDI CC mapped to them will not change audio today:**
 
-`mix`, `delay_level`, `reverb_level`, `delay_time`, `feedback`, `space`, `tone`, `pluck_timbre`, `pluck_level`, `pluck_octave`, `mod_depth`, `wow_flutter`, `drive`, `astro_amount`, `drone_level`, `capture_level`, `harmonic_spread`, `aspect_depth`, `root_offset`, `output_gain`.
+`mix`, `delay_level`, `reverb_level`, `delay_time`, `feedback`, `space`, `tone`, `pluck_timbre`, `pluck_octave`, `mod_depth`, `wow_flutter`, `drive`, `astro_amount`, `capture_level`, `harmonic_spread`, `aspect_depth`, `root_offset`, `output_gain`.
 
 The **Output** slider (`output_gain`) is applied directly in `readParameters()`.
 
@@ -127,6 +130,7 @@ Stored in processor atomics / ValueTree properties; lost unless custom MIDI mapp
 | Substance … Root Drift | CC **20–27** | `macro_substance` … `macro_root` |
 | Euclidean rate / wet | CC **28–29** | `euclid_rate`, `euclid_wet` |
 | Drone On / Capture / Freeze / Euclidean | CC **30–33** | Toggles (≥ 64 on) |
+| Organ mode | CC **35** | `organ_mode` |
 | Pitch bend | Wheel | ±2 semitones on root |
 
 ### Roadmap (not yet in code)

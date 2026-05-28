@@ -70,7 +70,7 @@ The orbit rings show capture state:
 - `Freeze`: holds the main delay/reverb feedback path, not the planet tail buffers.
 - Number keys: momentary planet-tail capture gates.
 - `Q`–`P`: one-shot reverb tank plucks per planet (see `docs/midi-control.md`).
-- `A`–`;`: toggle planet mute.
+- `A`–`;`: toggle planet mute (default), or hold to gate each planet drone layer when **Organ** is on.
 - Double-click planet: mute/unmute that planet layer.
 - `Reset Planet` / `Reset Orbits`: reset position offsets only; they do not clear captured audio.
 

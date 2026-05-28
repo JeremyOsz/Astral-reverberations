@@ -32,6 +32,7 @@ constexpr int kMidiCcCaptureEnable = 31;
 constexpr int kMidiCcFreeze = 32;
 constexpr int kMidiCcEuclidEnable = 33;
 constexpr int kMidiCcRootLock = 34;
+constexpr int kMidiCcOrganMode = 35;
 constexpr int kMidiCcSustainPedal = 64;
 
 constexpr float kMidiPitchBendSemitones = 2.0f;

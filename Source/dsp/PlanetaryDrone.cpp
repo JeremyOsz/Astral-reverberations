@@ -44,6 +44,29 @@ float softSine(float phase, float bloom)
     return fundamental + upper + shimmer;
 }
 
+float oscillatorForShape(float phase, float bloom, int shape)
+{
+    switch (std::clamp(shape, 0, 4)) {
+    case 1:
+        return std::sin(phase) >= 0.0f ? 0.82f : -0.82f;
+    case 2:
+        return (2.0f * (phase / kTwoPi)) - 1.0f;
+    case 3:
+        return 1.0f - 4.0f * std::abs((phase / kTwoPi) - 0.5f);
+    case 4:
+        return std::tanh(softSine(phase, bloom) * 1.8f);
+    default:
+        return softSine(phase, bloom);
+    }
+}
+
+float onePoleCoefficient(float cutoffHz, double sampleRate)
+{
+    const float safeCutoff = std::clamp(cutoffHz, 20.0f, 18000.0f);
+    const float x = std::exp(-kTwoPi * safeCutoff / static_cast<float>(std::max(1.0, sampleRate)));
+    return std::clamp(1.0f - x, 0.0f, 1.0f);
+}
+
 // Chooses a short feedback-loop delay that supports the requested long decay time.
 int manualTailDelaySamples(float tailSeconds, double sampleRate, int bufferSize)
 {
@@ -175,6 +198,7 @@ void PlanetaryDrone::reset()
 {
     phases.fill(0.0f);
     beatPhases.fill(0.0f);
+    voiceFilterStates.fill(0.0f);
     tailLevels.fill(0.0f);
     gateEnvelope = 0.0f;
     for (auto& tail : manualTails) {
@@ -191,6 +215,7 @@ void PlanetaryDrone::resetCapture()
 void PlanetaryDrone::processBlock(
     const StereoBufferView& input,
     const StereoBufferView& output,
+    const StereoBufferView& captureInput,
     const PlanetaryDroneParameters& parameters,
     const astro::AstroDroneFrame& frame)
 {
@@ -199,28 +224,56 @@ void PlanetaryDrone::processBlock(
     }
 
     const int samplesToProcess = std::max(0, input.numSamples);
-    const float droneLevel = clamp01(parameters.droneLevel);
+    const float droneLevel = std::clamp(parameters.droneLevel, 0.0f, 1.5f);
     const float captureLevel = clamp01(parameters.captureLevel);
     const float harmonicSpread = clamp01(parameters.harmonicSpread);
     const float aspectDepth = clamp01(parameters.aspectDepth);
     const float safeRoot = std::clamp(parameters.rootFrequencyHz, 8.0f, 16000.0f);
-    const float targetGate = parameters.gate ? 1.0f : 0.0f;
-    const float gateStep = parameters.gate ? 0.0025f : 0.0045f;
+    bool anyOrganLayerHeld = false;
+    if (parameters.organMode) {
+        for (std::size_t index = 0; index < parameters.organLayerGates.size(); ++index) {
+            if (parameters.organLayerGates[index] && !parameters.mutedLayers[index]) {
+                anyOrganLayerHeld = true;
+                break;
+            }
+        }
+    }
+    const bool gateOpen = parameters.gate || anyOrganLayerHeld;
+    const float targetGate = gateOpen ? 1.0f : 0.0f;
+    const float gateStep = gateOpen ? 0.0025f : 0.0045f;
     const float aspectGain = 1.0f
         + frame.rootReinforcement * aspectDepth * 0.18f
         + frame.consonantBloom * aspectDepth * 0.22f;
     const float beatingDepth = frame.tensionBeating * aspectDepth;
     std::array<float, kLayerCount> blockTailPeaks{};
+    bool anyManualCaptureHeld = false;
+    if (parameters.captureEnabled) {
+        for (std::size_t index = 0; index < parameters.manualLayerGates.size(); ++index) {
+            if (parameters.manualLayerGates[index] && !parameters.mutedLayers[index]) {
+                anyManualCaptureHeld = true;
+                break;
+            }
+        }
+    }
+    const bool captureInputValid = captureInput.left != nullptr && captureInput.right != nullptr
+        && captureInput.numSamples >= samplesToProcess;
+    float captureInputPeak = 0.0f;
+    if (captureInputValid) {
+        for (int index = 0; index < samplesToProcess; ++index) {
+            captureInputPeak = std::max(
+                captureInputPeak,
+                std::max(std::abs(captureInput.left[index]), std::abs(captureInput.right[index])));
+        }
+    }
+    const bool blockUseExternalCapture = captureInputPeak > 0.002f;
 
     for (int sample = 0; sample < samplesToProcess; ++sample) {
         const float inLeft = sanitize(input.left[sample]);
         const float inRight = sanitize(input.right[sample]);
-        if (parameters.captureEnabled) {
-            capture.write(inLeft, inRight);
-        }
-
+        const float captureInLeft = captureInputValid ? sanitize(captureInput.left[sample]) : inLeft;
+        const float captureInRight = captureInputValid ? sanitize(captureInput.right[sample]) : inRight;
         gateEnvelope += (targetGate - gateEnvelope) * gateStep;
-        if (gateEnvelope < 0.000001f && !parameters.gate && captureLevel <= 0.0f) {
+        if (gateEnvelope < 0.000001f && !gateOpen && captureLevel <= 0.0f) {
             continue;
         }
 
@@ -241,51 +294,75 @@ void PlanetaryDrone::processBlock(
             const float beatRate = 0.04f + layer.driftRate * 1.8f + frame.aspectTapDensity * 0.6f;
             const float beatIncrement = kTwoPi * beatRate / static_cast<float>(sampleRate);
             const float beat = 1.0f + std::sin(beatPhases[index]) * beatingDepth * 0.18f;
-            const float voice = softSine(phases[index], frame.consonantBloom) * layer.amplitude * beat;
+            const float rawVoice = oscillatorForShape(phases[index], frame.consonantBloom, parameters.waveShapes[index]);
+            const float filter01 = clamp01(parameters.filterCutoffs[index]);
+            const float cutoffHz = 180.0f + filter01 * filter01 * 11820.0f;
+            const float voiceFilterCoefficient = onePoleCoefficient(cutoffHz, sampleRate);
+            voiceFilterStates[index] += (rawVoice - voiceFilterStates[index]) * voiceFilterCoefficient;
+            const float voice = voiceFilterStates[index] * layer.amplitude * beat;
             const float pan = std::clamp(layer.pan + frame.phaseSplit * 0.18f, -1.0f, 1.0f);
             const float leftGain = std::sqrt(0.5f * (1.0f - pan));
             const float rightGain = std::sqrt(0.5f * (1.0f + pan));
 
-            droneLeft += voice * leftGain;
-            droneRight += voice * rightGain;
-
-            if (captureLevel > 0.0f) {
-                const float scan = std::fmod(layer.tapePosition + phases[index] / kTwoPi * 0.015f, 1.0f);
-                droneLeft += capture.readLeft(scan) * captureLevel * layer.amplitude * 0.22f;
-                droneRight += capture.readRight(scan) * captureLevel * layer.amplitude * 0.22f;
-            }
-
+            const bool manualCaptureHeld = parameters.captureEnabled && parameters.manualLayerGates[index];
+            const float tailSourceLeft = manualCaptureHeld
+                ? (blockUseExternalCapture ? captureInLeft : voice * leftGain)
+                : captureInLeft;
+            const float tailSourceRight = manualCaptureHeld
+                ? (blockUseExternalCapture ? captureInRight : voice * rightGain)
+                : captureInRight;
+            bool tailReplacingLayer = manualCaptureHeld;
             if (captureLevel > 0.0f) {
                 float tailRight = 0.0f;
-                const bool manualActive = parameters.captureEnabled && parameters.manualLayerGates[index];
                 const float tailLeft = manualTails[index].process(
-                    inLeft,
-                    inRight,
+                    tailSourceLeft,
+                    tailSourceRight,
                     layer.tailSeconds,
                     captureLevel * layer.amplitude,
                     pan,
-                    manualActive,
+                    manualCaptureHeld,
                     tailRight,
                     sampleRate);
                 manualLeft += tailLeft;
                 manualRight += tailRight;
                 const float delayedEnergy = std::max(std::abs(tailLeft), std::abs(tailRight));
-                const float activeEnergy = manualActive ? std::max(std::abs(inLeft), std::abs(inRight)) * captureLevel * layer.amplitude : 0.0f;
+                const float activeEnergy = manualCaptureHeld ? std::max(std::abs(tailSourceLeft), std::abs(tailSourceRight)) * captureLevel * layer.amplitude : 0.0f;
                 blockTailPeaks[index] = std::max(blockTailPeaks[index], std::max(delayedEnergy, activeEnergy));
+                tailReplacingLayer = manualCaptureHeld || manualTails[index].isReplacingLayer() || delayedEnergy > 0.000001f;
+            }
+
+            const bool layerDroneAllowed = !parameters.organMode || parameters.organLayerGates[index];
+            if (!tailReplacingLayer && layerDroneAllowed) {
+                droneLeft += voice * leftGain;
+                droneRight += voice * rightGain;
+
+                if (captureLevel > 0.0f && parameters.captureEnabled && !anyManualCaptureHeld) {
+                    const float scan = std::fmod(layer.tapePosition + phases[index] / kTwoPi * 0.015f, 1.0f);
+                    droneLeft += capture.readLeft(scan) * captureLevel * layer.amplitude * 0.22f;
+                    droneRight += capture.readRight(scan) * captureLevel * layer.amplitude * 0.22f;
+                }
             }
 
             advancePhase(phases[index], increment);
             advancePhase(beatPhases[index], beatIncrement);
         }
 
+        if (parameters.captureEnabled) {
+            capture.write(
+                blockUseExternalCapture ? captureInLeft : droneLeft,
+                blockUseExternalCapture ? captureInRight : droneRight);
+        }
+
         const float layerScale = 1.0f / static_cast<float>(frame.layers.size());
-        const float manualScale = 0.55f / static_cast<float>(frame.layers.size());
+        const float manualScale = anyManualCaptureHeld ? layerScale : (0.55f / static_cast<float>(frame.layers.size()));
+        const float synthGain = droneLevel * gateEnvelope;
+        const float manualGain = 1.0f;
         output.left[sample] = sanitize(output.left[sample]
-            + std::tanh(droneLeft * layerScale * aspectGain) * droneLevel * gateEnvelope
-            + std::tanh(manualLeft * manualScale * aspectGain));
+            + std::tanh(droneLeft * layerScale * aspectGain) * synthGain
+            + std::tanh(manualLeft * manualScale * aspectGain) * manualGain);
         output.right[sample] = sanitize(output.right[sample]
-            + std::tanh(droneRight * layerScale * aspectGain) * droneLevel * gateEnvelope
-            + std::tanh(manualRight * manualScale * aspectGain));
+            + std::tanh(droneRight * layerScale * aspectGain) * synthGain
+            + std::tanh(manualRight * manualScale * aspectGain) * manualGain);
 
     }
 

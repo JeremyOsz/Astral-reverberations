@@ -17,8 +17,12 @@ struct PlanetaryDroneParameters {
     float aspectDepth = 0.5f;
     float rootFrequencyHz = 110.0f;
     bool gate = false;
+    bool organMode = false;
     bool captureEnabled = false;
+    std::array<int, kManualLayerCount> waveShapes{};
+    std::array<float, kManualLayerCount> filterCutoffs{{0.82f, 0.82f, 0.82f, 0.82f, 0.82f, 0.82f, 0.82f, 0.82f, 0.82f, 0.82f}};
     std::array<bool, kManualLayerCount> manualLayerGates{};
+    std::array<bool, kManualLayerCount> organLayerGates{};
     std::array<bool, kManualLayerCount> mutedLayers{};
 };
 
@@ -38,6 +42,7 @@ public:
     void processBlock(
         const StereoBufferView& input,
         const StereoBufferView& output,
+        const StereoBufferView& captureInput,
         const PlanetaryDroneParameters& parameters,
         const astro::AstroDroneFrame& frame);
     /// Returns smoothed per-planet tail energy for UI feedback.
@@ -74,11 +79,14 @@ private:
         void reset();
         /// Processes one sample of a keyed orbit tail and returns left output, writing right output by reference.
         float process(float inputLeft, float inputRight, float tailSeconds, float level, float pan, bool active, float& rightOut, double sampleRate);
+        /// Returns true while the tail is being excited or still audibly decaying.
+        bool isReplacingLayer() const noexcept { return envelope > 0.0008f; }
     };
 
     double sampleRate = 44100.0;
     std::array<float, kLayerCount> phases{};
     std::array<float, kLayerCount> beatPhases{};
+    std::array<float, kLayerCount> voiceFilterStates{};
     std::array<float, kLayerCount> tailLevels{};
     std::array<ManualTailBuffer, kLayerCount> manualTails{};
     CaptureBuffer capture;

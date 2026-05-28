@@ -27,11 +27,9 @@ struct ResolvedMacroParameters {
     float wowFlutter = 0.25f;
     float drive = 0.15f;
     float astroAmount = 0.5f;
-    float pluckLevel = 1.0f;
     float pluckTimbre = 0.5f;
     float pluckOctave = 0.0f;
     float outputGain = 1.0f;
-    float droneLevel = 0.45f;
     float captureLevel = 0.35f;
     float harmonicSpread = 0.65f;
     float aspectDepth = 0.5f;

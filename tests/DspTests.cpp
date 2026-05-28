@@ -253,11 +253,47 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
     require(peak(outputLeft) < 0.000001f, "closed MIDI gate keeps drone silent on left");
     require(peak(outputRight) < 0.000001f, "closed MIDI gate keeps drone silent on right");
+
+    drone.reset();
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    droneParameters.gate = false;
+    droneParameters.captureLevel = 0.0f;
+    droneParameters.captureEnabled = false;
+    droneParameters.organMode = true;
+    droneParameters.organLayerGates.fill(false);
+    droneParameters.organLayerGates[static_cast<std::size_t>(astral::astro::PlanetId::Sun)] = true;
+
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+
+    require(peak(outputLeft) > 0.001f, "organ mode gates only held planet drone on left");
+    require(peak(outputRight) > 0.001f, "organ mode gates only held planet drone on right");
+
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    droneParameters.organLayerGates.fill(false);
+
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+
+    require(peak(outputLeft) < 0.000001f, "organ mode silences drone when no keys are held");
+    require(peak(outputRight) < 0.000001f, "organ mode silences drone when no keys are held");
+    droneParameters.organMode = false;
 
     std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
     std::fill(outputRight.begin(), outputRight.end(), 0.0f);
@@ -270,6 +306,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -292,6 +329,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -311,7 +349,7 @@ void runDspTests()
         layer.tailSeconds = 2.0f;
     }
     droneFrame.layers[static_cast<std::size_t>(astral::astro::PlanetId::Sun)].tailSeconds = 2.0f;
-    droneFrame.layers[static_cast<std::size_t>(astral::astro::PlanetId::Pluto)].tailSeconds = 12.0f;
+    droneFrame.layers[static_cast<std::size_t>(astral::astro::PlanetId::Pluto)].tailSeconds = 18.0f;
 
     droneParameters.droneLevel = 0.0f;
     droneParameters.captureLevel = 0.8f;
@@ -323,6 +361,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -341,6 +380,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -359,6 +399,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -372,6 +413,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
 
@@ -392,6 +434,7 @@ void runDspTests()
         drone.processBlock(
             {inputLeft.data(), inputRight.data(), sampleCount},
             {outputLeft.data(), outputRight.data(), sampleCount},
+            {inputLeft.data(), inputRight.data(), sampleCount},
             droneParameters,
             droneFrame);
 
@@ -404,6 +447,7 @@ void runDspTests()
         drone.processBlock(
             {inputLeft.data(), inputRight.data(), sampleCount},
             {outputLeft.data(), outputRight.data(), sampleCount},
+            {inputLeft.data(), inputRight.data(), sampleCount},
             droneParameters,
             droneFrame);
         return peak(outputLeft);
@@ -426,6 +470,75 @@ void runDspTests()
         layer.pan = 0.0f;
     }
     droneParameters.droneLevel = 1.0f;
+    droneParameters.captureLevel = 0.8f;
+    droneParameters.captureEnabled = true;
+    droneParameters.gate = true;
+    droneParameters.manualLayerGates.fill(false);
+    droneParameters.manualLayerGates[static_cast<std::size_t>(astral::astro::PlanetId::Sun)] = true;
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+    const float capturedDronePeak = peak(outputLeft);
+    require(capturedDronePeak > 0.001f, "held capture routes the planet oscillator into its tail instead of silence");
+    require(peak(outputRight) > 0.001f, "held capture routes the planet oscillator into its tail on right");
+
+    drone.reset();
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    for (std::size_t index = 0; index < droneFrame.layers.size(); ++index) {
+        auto& layer = droneFrame.layers[index];
+        layer.ratio = 1.0f;
+        layer.amplitude = index == 0 ? 1.0f : 0.0f;
+        layer.detuneCents = 0.0f;
+        layer.pan = 0.0f;
+        layer.tailSeconds = 2.0f;
+    }
+    droneParameters.droneLevel = 0.7f;
+    droneParameters.captureLevel = 0.35f;
+    droneParameters.captureEnabled = true;
+    droneParameters.gate = true;
+    droneParameters.organMode = false;
+    droneParameters.manualLayerGates.fill(false);
+    droneParameters.organLayerGates.fill(false);
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+    const float droneOnlyPeak = peak(outputLeft);
+
+    drone.reset();
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    droneParameters.manualLayerGates[static_cast<std::size_t>(astral::astro::PlanetId::Sun)] = true;
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+    require(peak(outputLeft) <= droneOnlyPeak * 1.15f, "held capture does not stack on top of the planet drone");
+
+
+    drone.reset();
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    for (std::size_t index = 0; index < droneFrame.layers.size(); ++index) {
+        auto& layer = droneFrame.layers[index];
+        layer.ratio = 1.0f;
+        layer.amplitude = index == 0 ? 1.0f : 0.0f;
+        layer.detuneCents = 0.0f;
+        layer.pan = 0.0f;
+    }
+    droneParameters.droneLevel = 1.0f;
     droneParameters.captureLevel = 0.0f;
     droneParameters.captureEnabled = false;
     droneParameters.gate = true;
@@ -433,6 +546,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
     const int lowRootCrossings = zeroCrossings(outputLeft);
@@ -444,6 +558,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
     const int highRootCrossings = zeroCrossings(outputLeft);
@@ -457,6 +572,7 @@ void runDspTests()
     drone.processBlock(
         {inputLeft.data(), inputRight.data(), sampleCount},
         {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
         droneParameters,
         droneFrame);
     require(peak(outputLeft) < 0.000001f, "muted planet layers silence left drone contribution");

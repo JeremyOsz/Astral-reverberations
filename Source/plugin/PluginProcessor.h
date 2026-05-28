@@ -86,10 +86,14 @@ public:
     bool hasPlanetLongitudeOffset(astro::PlanetId planet) const;
     /// Opens or closes the momentary keyboard gate for one planet tail.
     void setManualOrbitTailGate(astro::PlanetId planet, bool active);
+    /// Opens or closes the momentary organ-mode gate for one planet drone layer.
+    void setOrganLayerGate(astro::PlanetId planet, bool active);
     /// Queues a one-shot excitation into the main reverb tank from an orbit-ring click or MIDI pluck.
     void tapOrbitReverbTank(astro::PlanetId planet, float wetAmount = 1.0f);
     /// Returns true when a planet tail key is held and the planet is not muted.
     bool isManualOrbitTailActive(astro::PlanetId planet) const;
+    /// Returns true when an organ-mode gate key is held and the planet is not muted.
+    bool isOrganLayerActive(astro::PlanetId planet) const;
     /// Returns the latest smoothed captured-tail level for a planet.
     float getOrbitTailLevel(astro::PlanetId planet) const;
     /// Toggles a planet layer across drone, capture, and node-tap contribution.
@@ -125,6 +129,7 @@ private:
     juce::AudioBuffer<float> inputCopyBuffer;
     std::array<bool, 128> heldDroneGateNotes{};
     std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> manualOrbitTailGates{};
+    std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> organLayerGates{};
     std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> planetMutes{};
     std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> orbitTailLevels{};
     std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> planetLongitudeOffsets{};

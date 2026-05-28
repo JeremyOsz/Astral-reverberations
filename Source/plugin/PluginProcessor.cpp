@@ -30,6 +30,11 @@ float getFloatParameter(const juce::AudioProcessorValueTreeState& state, const c
     return 0.0f;
 }
 
+juce::String planetParameterId(const char* prefix, std::size_t index)
+{
+    return juce::String(prefix) + juce::String(static_cast<int>(index));
+}
+
 // Converts a MIDI note number into equal-tempered frequency in Hz.
 float midiNoteToFrequency(int note)
 {
@@ -99,6 +104,7 @@ AstralReverberationsAudioProcessor::AstralReverberationsAudioProcessor()
         planetLongitudeOffsets[index].store(0.0f, std::memory_order_relaxed);
         planetLongitudeOffsetEnabled[index].store(false, std::memory_order_relaxed);
         manualOrbitTailGates[index].store(false, std::memory_order_relaxed);
+        organLayerGates[index].store(false, std::memory_order_relaxed);
         planetMutes[index].store(false, std::memory_order_relaxed);
         orbitTailLevels[index].store(0.0f, std::memory_order_relaxed);
     }
@@ -184,6 +190,7 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     drone.processBlock(
         {processingBuffer.getWritePointer(0), processingBuffer.getWritePointer(1), buffer.getNumSamples()},
         {processingBuffer.getWritePointer(0), processingBuffer.getWritePointer(1), buffer.getNumSamples()},
+        {inputCopyBuffer.getWritePointer(0), inputCopyBuffer.getWritePointer(1), buffer.getNumSamples()},
         readDroneParameters(),
         droneFrame);
     const auto tailLevels = drone.getTailLevels();
@@ -195,7 +202,7 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     auto effectParameters = readParameters();
     const int pendingTaps = pendingReverbTankTaps.exchange(0, std::memory_order_relaxed);
     if (pendingTaps > 0) {
-        effectParameters.reverbTankTapLevel = std::min(1.0f, static_cast<float>(pendingTaps) * 0.62f * effectParameters.pluckLevel);
+        effectParameters.reverbTankTapLevel = std::min(2.5f, static_cast<float>(pendingTaps) * 0.72f * effectParameters.pluckLevel * effectParameters.pluckSend);
         effectParameters.reverbTankTapPan = pendingReverbTankTapPan.load(std::memory_order_relaxed);
         effectParameters.reverbTankTapFrequencyHz = pendingReverbTankTapFrequencyHz.load(std::memory_order_relaxed);
         effectParameters.reverbTankTapWet = pendingReverbTankTapWet.load(std::memory_order_relaxed);
@@ -205,17 +212,18 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
             0.0f,
             1.0f);
     }
-    if (!effectParameters.inputMonitor) {
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
-            processingBuffer.setSample(
-                0,
-                sample,
-                processingBuffer.getSample(0, sample) - inputCopyBuffer.getSample(0, sample));
-            processingBuffer.setSample(
-                1,
-                sample,
-                processingBuffer.getSample(1, sample) - inputCopyBuffer.getSample(1, sample));
-        }
+    const bool inputMonitorEnabled = effectParameters.inputMonitor;
+    effectParameters.inputMonitor = false;
+
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
+        processingBuffer.setSample(
+            0,
+            sample,
+            processingBuffer.getSample(0, sample) - inputCopyBuffer.getSample(0, sample));
+        processingBuffer.setSample(
+            1,
+            sample,
+            processingBuffer.getSample(1, sample) - inputCopyBuffer.getSample(1, sample));
     }
 
     effect.processBlock(
@@ -223,6 +231,19 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         {processingBuffer.getWritePointer(0), processingBuffer.getWritePointer(1), buffer.getNumSamples()},
         effectParameters,
         astroFrame);
+
+    if (inputMonitorEnabled) {
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
+            processingBuffer.setSample(
+                0,
+                sample,
+                processingBuffer.getSample(0, sample) + inputCopyBuffer.getSample(0, sample));
+            processingBuffer.setSample(
+                1,
+                sample,
+                processingBuffer.getSample(1, sample) + inputCopyBuffer.getSample(1, sample));
+        }
+    }
 
     buffer.copyFrom(0, 0, processingBuffer, 0, 0, buffer.getNumSamples());
     buffer.copyFrom(1, 0, processingBuffer, 1, 0, buffer.getNumSamples());
@@ -324,6 +345,15 @@ void AstralReverberationsAudioProcessor::setManualOrbitTailGate(astro::PlanetId 
     manualOrbitTailGates[static_cast<std::size_t>(planet)].store(active, std::memory_order_relaxed);
 }
 
+void AstralReverberationsAudioProcessor::setOrganLayerGate(astro::PlanetId planet, bool active)
+{
+    const auto index = static_cast<std::size_t>(planet);
+    if (active) {
+        planetMutes[index].store(false, std::memory_order_relaxed);
+    }
+    organLayerGates[index].store(active, std::memory_order_relaxed);
+}
+
 void AstralReverberationsAudioProcessor::tapOrbitReverbTank(astro::PlanetId planet, float wetAmount)
 {
     const auto index = static_cast<std::size_t>(planet);
@@ -342,6 +372,11 @@ void AstralReverberationsAudioProcessor::tapOrbitReverbTank(astro::PlanetId plan
 bool AstralReverberationsAudioProcessor::isManualOrbitTailActive(astro::PlanetId planet) const
 {
     return !isPlanetMuted(planet) && manualOrbitTailGates[static_cast<std::size_t>(planet)].load(std::memory_order_relaxed);
+}
+
+bool AstralReverberationsAudioProcessor::isOrganLayerActive(astro::PlanetId planet) const
+{
+    return !isPlanetMuted(planet) && organLayerGates[static_cast<std::size_t>(planet)].load(std::memory_order_relaxed);
 }
 
 void AstralReverberationsAudioProcessor::queueReverbTankTap(std::size_t planetIndex, const astro::AstroHarmonicLayer& layer, float wetAmount)
@@ -411,6 +446,7 @@ void AstralReverberationsAudioProcessor::togglePlanetMute(astro::PlanetId planet
     planetMutes[index].store(next, std::memory_order_relaxed);
     if (next) {
         manualOrbitTailGates[index].store(false, std::memory_order_relaxed);
+        organLayerGates[index].store(false, std::memory_order_relaxed);
         orbitTailLevels[index].store(0.0f, std::memory_order_relaxed);
     }
 }
@@ -501,15 +537,22 @@ dsp::AstralParameters AstralReverberationsAudioProcessor::readParameters() const
     parameters.feedback = resolved.feedback;
     parameters.space = resolved.space;
     parameters.tone = resolved.tone;
+    parameters.reverbDecay = getFloatParameter(parameterState, "reverb_decay");
+    parameters.reverbDamping = getFloatParameter(parameterState, "reverb_damping");
+    parameters.reverbModDepth = getFloatParameter(parameterState, "reverb_mod");
+    parameters.pluckSend = getFloatParameter(parameterState, "pluck_send");
     parameters.modDepth = resolved.modDepth;
     parameters.wowFlutter = resolved.wowFlutter;
     parameters.drive = resolved.drive;
     parameters.astroAmount = resolved.astroAmount;
     parameters.astroSpeed = getFloatParameter(parameterState, "astro_speed");
-    parameters.pluckLevel = resolved.pluckLevel;
+    parameters.pluckLevel = std::clamp(getFloatParameter(parameterState, "pluck_level"), 0.0f, 1.5f);
     parameters.pluckTimbre = resolved.pluckTimbre;
     parameters.freeze = getFloatParameter(parameterState, "freeze") >= 0.5f;
     parameters.inputMonitor = getFloatParameter(parameterState, "input_monitor") >= 0.5f;
+    parameters.eqLowGainDb = getFloatParameter(parameterState, "master_eq_low");
+    parameters.eqMidGainDb = getFloatParameter(parameterState, "master_eq_mid");
+    parameters.eqHighGainDb = getFloatParameter(parameterState, "master_eq_high");
     parameters.outputGain = std::clamp(getFloatParameter(parameterState, "output_gain"), 0.0f, 2.0f);
     return parameters;
 }
@@ -518,25 +561,34 @@ dsp::PlanetaryDroneParameters AstralReverberationsAudioProcessor::readDroneParam
 {
     const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
     dsp::PlanetaryDroneParameters parameters;
-    parameters.droneLevel = resolved.droneLevel;
-    parameters.captureLevel = resolved.captureLevel;
+    parameters.droneLevel = std::clamp(getFloatParameter(parameterState, "drone_level"), 0.0f, 1.5f);
+    const float captureKnob = std::clamp(getFloatParameter(parameterState, "capture_level"), 0.0f, 1.0f);
+    parameters.captureLevel = std::clamp(captureKnob * resolved.captureLevel / 0.35f, 0.0f, 1.0f);
     parameters.harmonicSpread = resolved.harmonicSpread;
     parameters.aspectDepth = resolved.aspectDepth;
     parameters.rootFrequencyHz = getDroneRootFrequencyHz();
     parameters.gate = isDroneGateOpen();
-    bool anyMidiTailHeld = false;
+    parameters.organMode = getFloatParameter(parameterState, "organ_mode") >= 0.5f;
+    for (std::size_t index = 0; index < parameters.waveShapes.size(); ++index) {
+        parameters.waveShapes[index] = getIntParameter(parameterState, planetParameterId("planet_wave_", index).toRawUTF8(), 0);
+        parameters.filterCutoffs[index] = getFloatParameter(parameterState, planetParameterId("planet_filter_", index).toRawUTF8());
+    }
+    bool anyTailHeld = false;
     for (int tailNote = kMidiTailNoteFirst; tailNote <= kMidiTailNoteLast; ++tailNote) {
         if (heldDroneGateNotes[static_cast<std::size_t>(tailNote)]) {
-            anyMidiTailHeld = true;
+            anyTailHeld = true;
             break;
         }
     }
-    parameters.captureEnabled = getFloatParameter(parameterState, "capture_enable") >= 0.5f || anyMidiTailHeld;
     for (std::size_t index = 0; index < parameters.manualLayerGates.size(); ++index) {
         const bool muted = planetMutes[index].load(std::memory_order_relaxed);
+        const bool organHeld = parameters.organMode && organLayerGates[index].load(std::memory_order_relaxed);
         parameters.manualLayerGates[index] = !muted && manualOrbitTailGates[index].load(std::memory_order_relaxed);
-        parameters.mutedLayers[index] = muted;
+        parameters.organLayerGates[index] = organHeld;
+        parameters.mutedLayers[index] = muted && !organHeld;
+        anyTailHeld = anyTailHeld || parameters.manualLayerGates[index] || organHeld;
     }
+    parameters.captureEnabled = getFloatParameter(parameterState, "capture_enable") >= 0.5f || anyTailHeld;
     return parameters;
 }
 
@@ -658,6 +710,7 @@ void AstralReverberationsAudioProcessor::processMidiInput(const juce::MidiBuffer
             heldDroneGateNotes.fill(false);
             for (std::size_t index = 0; index < manualOrbitTailGates.size(); ++index) {
                 manualOrbitTailGates[index].store(false, std::memory_order_relaxed);
+                organLayerGates[index].store(false, std::memory_order_relaxed);
             }
         } else if (message.isPitchWheel()) {
             midiPitchBendSemitones = midiPitchWheelToSemitones(message.getPitchWheelValue());
@@ -711,6 +764,9 @@ void AstralReverberationsAudioProcessor::processMidiInput(const juce::MidiBuffer
                 case kMidiCcRootLock:
                     setBoolParameterFromMidiCc("root_lock", value);
                     break;
+                case kMidiCcOrganMode:
+                    setBoolParameterFromMidiCc("organ_mode", value);
+                    break;
                 case kMidiCcSustainPedal:
                     midiSustainPedalDown = value >= 64;
                     break;
@@ -760,8 +816,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioPro
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("feedback", "Tape Regeneration", range(0.0f, 0.95f), 0.42f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("space", "Reverb Tank Size", range(0.0f, 1.0f), 0.55f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tone", "Tape/Reverb Tone", range(0.0f, 1.0f), 0.55f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_decay", "Reverb Decay", range(0.0f, 1.0f), 0.5f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_damping", "Reverb Damping", range(0.0f, 1.0f), 0.45f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_mod", "Reverb Modulation", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_timbre", "Pluck Timbre", range(0.0f, 1.0f), 0.5f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_level", "Pluck Level", range(0.0f, 1.5f), 1.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_send", "Pluck Send", range(0.0f, 2.5f), 1.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_octave", "Pluck Octave", range(-2.0f, 2.0f, 1.0f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("mod_depth", "Orbit Mod Depth", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("wow_flutter", "Tape Wow/Flutter", range(0.0f, 1.0f), 0.25f));
@@ -771,17 +831,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioPro
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("euclid_enable", "Euclidean Plucks", false));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("euclid_rate", "Euclidean Rate", range(0.25f, 16.0f, 0.0f, 0.55f), 4.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("euclid_wet", "Euclidean Wet", range(0.0f, 1.0f), 1.0f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("drone_level", "Drone Level", range(0.0f, 1.0f), 0.45f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("drone_level", "Drone Level", range(0.0f, 1.5f), 0.70f));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("drone_hold", "Drone On", false));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("capture_level", "Capture Level", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("capture_enable", "Capture Enable", false));
+    parameters.push_back(std::make_unique<juce::AudioParameterBool>("organ_mode", "Organ Mode", false));
     parameters.push_back(std::make_unique<juce::AudioParameterInt>("root_note", "Root Note", 24, 84, 45));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("root_lock", "Manual Root", true));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("root_offset", "Root Offset", range(-24.0f, 24.0f, 1.0f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("harmonic_spread", "Harmonic Spread", range(0.0f, 1.0f), 0.65f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("aspect_depth", "Aspect Depth", range(0.0f, 1.0f), 0.5f));
+    for (std::size_t index = 0; index < static_cast<std::size_t>(astro::PlanetId::Count); ++index) {
+        const auto suffix = juce::String(static_cast<int>(index + 1));
+        parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
+            planetParameterId("planet_wave_", index),
+            "Planet " + suffix + " Wave",
+            juce::StringArray{"Sine", "Square", "Saw", "Triangle", "Fold"},
+            0));
+        parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
+            planetParameterId("planet_filter_", index),
+            "Planet " + suffix + " Filter",
+            range(0.0f, 1.0f),
+            0.82f));
+    }
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("freeze", "Freeze", false));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("input_monitor", "Input Monitor", false));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_low", "Master EQ Low", range(-12.0f, 12.0f, 0.1f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_mid", "Master EQ Mid", range(-12.0f, 12.0f, 0.1f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_high", "Master EQ High", range(-12.0f, 12.0f, 0.1f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("output_gain", "Output", range(0.0f, 2.0f), 1.0f));
     return {parameters.begin(), parameters.end()};
 }

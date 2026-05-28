@@ -30,17 +30,23 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     AstralReverberationsAudioProcessor& audioProcessor;
     std::unique_ptr<OrbitMapComponent> orbitMap;
     juce::OwnedArray<juce::Slider> sliders;
     juce::OwnedArray<juce::Label> labels;
     juce::ComboBox rootNoteBox;
+    juce::ComboBox planetWaveBox;
+    juce::Label planetWaveLabel;
+    juce::Slider planetFilterSlider;
+    juce::Label planetFilterLabel;
     juce::ToggleButton droneHoldButton;
     juce::ToggleButton rootLockButton;
     juce::ToggleButton inputMonitorButton;
     juce::ToggleButton freezeButton;
     juce::ToggleButton captureButton;
+    juce::ToggleButton organButton;
     juce::ToggleButton euclidButton;
     juce::TextButton resetPlanetButton;
     juce::TextButton resetOrbitsButton;
@@ -54,17 +60,21 @@ private:
     juce::Label statusLabel;
     juce::TooltipWindow tooltipWindow;
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
+    std::unique_ptr<SliderAttachment> planetFilterAttachment;
+    std::unique_ptr<ComboBoxAttachment> planetWaveAttachment;
     std::unique_ptr<ButtonAttachment> droneHoldAttachment;
     std::unique_ptr<ButtonAttachment> rootLockAttachment;
     std::unique_ptr<ButtonAttachment> inputMonitorAttachment;
     std::unique_ptr<ButtonAttachment> freezeAttachment;
     std::unique_ptr<ButtonAttachment> captureAttachment;
+    std::unique_ptr<ButtonAttachment> organAttachment;
     std::unique_ptr<ButtonAttachment> euclidAttachment;
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> playbackKeyWasDown{};
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> captureKeyWasDown{};
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> muteKeyWasDown{};
     bool controlsPopupVisible = false;
     bool syncingHistoricalPresetUi = false;
+    astro::PlanetId attachedPlanetControls = astro::PlanetId::Count;
 
     enum class SliderLayout { Inspector, Bottom };
 
@@ -77,6 +87,8 @@ private:
     /// Polls keyboard rows and updates momentary ring gates plus mute toggles.
     void updateKeyboardControls();
     void timerCallback() override;
+    /// Rebinds selected-planet wave/filter controls when the selected orbit node changes.
+    void updatePlanetControls();
     /// Refreshes gate/root/input status text in the header.
     void updateStatus();
     /// Applies a built-in historical Julian day and switches to Manual Date mode.

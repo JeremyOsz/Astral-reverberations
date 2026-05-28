@@ -64,10 +64,14 @@ void runAstroTests()
     }
     require(droneFrame.layers[static_cast<std::size_t>(PlanetId::Moon)].tailSeconds
             < droneFrame.layers[static_cast<std::size_t>(PlanetId::Mercury)].tailSeconds,
-        "shorter lunar orbit maps to shorter tail than Mercury");
+        "Sarum key-order tail mapping grows from 1-0");
     require(droneFrame.layers[static_cast<std::size_t>(PlanetId::Jupiter)].tailSeconds
             < droneFrame.layers[static_cast<std::size_t>(PlanetId::Pluto)].tailSeconds,
-        "longer Pluto orbit maps to longer tail than Jupiter");
+        "Pluto receives the longest Sarum-style tail");
+    requireNear(droneFrame.layers[static_cast<std::size_t>(PlanetId::Pluto)].tailSeconds,
+        18.0f,
+        0.0001f,
+        "Pluto capture tail is 18 seconds");
     require(droneFrame.rootReinforcement >= 0.0f && droneFrame.rootReinforcement <= 1.0f, "root reinforcement is bounded");
     require(droneFrame.consonantBloom >= 0.0f && droneFrame.consonantBloom <= 1.0f, "consonant bloom is bounded");
     require(droneFrame.tensionBeating >= 0.0f && droneFrame.tensionBeating <= 1.0f, "tension beating is bounded");
