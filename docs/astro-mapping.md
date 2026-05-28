@@ -34,3 +34,9 @@ Hard aspects, such as conjunctions, squares, and oppositions, create tail blooms
 - `Manual Date`: recalls a stored Julian day.
 - `Simulated Orbit`: advances a fictional sky at a musical speed controlled by `astro_speed`.
 
+## Historical presets
+
+The inspector preset menu recalls fixed UTC moments (JFK assassination, Moon landing, D-Day, and others). Choosing one switches to `Manual Date` and loads that moment's Julian day into the engine. Planet longitudes are still approximate musical orbits, but each preset is repeatable and distinct.
+
+Custom dates remain available when the stored Julian day does not match a built-in preset.
+

@@ -2,6 +2,7 @@
 
 #include "astro/AstroMapper.h"
 #include "astro/AstrologyEngine.h"
+#include "astro/HistoricalPresets.h"
 
 using namespace astral::astro;
 
@@ -15,6 +16,17 @@ void runAstroTests()
     require(AstrologyEngine::signForLongitude(59.9f) == ZodiacSign::Taurus, "59.9 degrees is Taurus");
     require(AstrologyEngine::elementForSign(ZodiacSign::Scorpio) == Element::Water, "Scorpio is water");
     require(AstrologyEngine::qualityForSign(ZodiacSign::Aquarius) == Quality::Fixed, "Aquarius is fixed");
+
+    requireNear(AstrologyEngine::julianDayFromUtc(2000, 1, 1, 12), AstrologyEngine::J2000JulianDay, 0.0001, "J2000 UTC noon");
+    requireNear(AstrologyEngine::julianDayFromUtc(1963, 11, 22, 18, 30), 2438356.270833, 0.0001, "JFK assassination Julian day");
+
+    const auto presets = historicalPresets();
+    require(!presets.empty(), "historical presets are available");
+    for (const auto& preset : presets) {
+        const double julianDay = julianDayForPreset(preset);
+        require(std::isfinite(julianDay), "historical preset Julian day is finite");
+        require(findPresetIndexForJulianDay(julianDay).has_value(), "each preset round-trips through lookup");
+    }
 
     AstrologyEngine engine;
     const auto first = engine.snapshotForJulianDay(AstrologyEngine::J2000JulianDay + 123.0);

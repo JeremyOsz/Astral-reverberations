@@ -49,6 +49,7 @@ private:
     juce::TextButton fastButton;
     juce::TextButton controlsButton;
     juce::ComboBox astroModeBox;
+    juce::ComboBox historicalPresetBox;
     juce::Label titleLabel;
     juce::Label statusLabel;
     juce::TooltipWindow tooltipWindow;
@@ -63,9 +64,12 @@ private:
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> captureKeyWasDown{};
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> muteKeyWasDown{};
     bool controlsPopupVisible = false;
+    bool syncingHistoricalPresetUi = false;
 
-    /// Creates a labelled rotary slider and binds it to an APVTS parameter.
-    void addSlider(const char* parameterId, const juce::String& labelText);
+    enum class SliderLayout { Inspector, Bottom };
+
+    /// Creates a labelled slider and binds it to an APVTS parameter.
+    void addSlider(const char* parameterId, const juce::String& labelText, SliderLayout layout);
     /// Writes a normalized host-notified value to an APVTS parameter by id.
     void setParameterValue(const char* parameterId, float value);
     /// Synchronizes the root combo box with the root_note parameter.
@@ -75,6 +79,10 @@ private:
     void timerCallback() override;
     /// Refreshes gate/root/input status text in the header.
     void updateStatus();
+    /// Applies a built-in historical Julian day and switches to Manual Date mode.
+    void applyHistoricalPreset(std::size_t presetIndex);
+    /// Keeps the preset combo aligned with the stored manual Julian day.
+    void syncHistoricalPresetBox();
     /// Draws the dedicated live input meter in the right inspector strip.
     void drawInputMeter(juce::Graphics& graphics);
     /// Draws the controls reference popup.

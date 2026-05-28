@@ -133,6 +133,26 @@ double AstrologyEngine::julianDayFromUnixSeconds(double unixSeconds)
     return kUnixEpochJulianDay + unixSeconds / kSecondsPerDay;
 }
 
+double AstrologyEngine::julianDayFromUtc(int year, int month, int day, int hour, int minute, int second)
+{
+    int y = year;
+    int m = month;
+    if (m <= 2) {
+        y -= 1;
+        m += 12;
+    }
+
+    const int century = y / 100;
+    const int b = 2 - century + century / 4;
+    const double dayFraction = (hour + minute / 60.0 + second / 3600.0) / 24.0;
+    return static_cast<int>(365.25 * (y + 4716))
+        + static_cast<int>(30.6001 * (m + 1))
+        + day
+        + b
+        - 1524.5
+        + dayFraction;
+}
+
 double AstrologyEngine::unixSecondsFromSystemClock()
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();

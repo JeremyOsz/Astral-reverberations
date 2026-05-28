@@ -1,5 +1,6 @@
 #include "plugin/PluginEditor.h"
 
+#include "astro/HistoricalPresets.h"
 #include "BinaryData.h"
 
 #include <algorithm>
@@ -12,8 +13,9 @@ namespace {
 
 constexpr int kPadding = 16;
 constexpr int kHeaderHeight = 48;
-constexpr int kInspectorWidth = 210;
-constexpr int kBottomHeight = 88;
+constexpr int kInspectorWidth = 236;
+constexpr int kInspectorSliderRowHeight = 32;
+constexpr int kBottomHeight = 92;
 constexpr int kInputMeterHeight = 42;
 constexpr float kOrbitRadiusFactor = 0.46f;
 constexpr float kSignMarkerOffset = 22.0f;
@@ -109,62 +111,26 @@ juce::String signEffectLabel(std::size_t index)
 // Provides concise control help without adding visible instructional text.
 juce::String sliderTooltip(const juce::String& parameterId)
 {
-    if (parameterId == "drone_level") {
-        return "Sets the harmonic planetary drone level.";
+    if (parameterId == "macro_substance") {
+        return "Overall presence: wet blend, echo/verb send, and output level.";
     }
-    if (parameterId == "capture_level") {
-        return "Sets captured-buffer and orbit-tail playback level.";
+    if (parameterId == "macro_mneme") {
+        return "Memory: capture tails, orbit echo path, and safer feedback when tails are hot.";
     }
-    if (parameterId == "harmonic_spread") {
-        return "Spreads planet harmonic ratios from the root note.";
+    if (parameterId == "macro_choir") {
+        return "Harmonic body: drone level, spread, aspect bloom, and ring pluck level.";
     }
-    if (parameterId == "aspect_depth") {
-        return "Sets how strongly aspects add bloom, beating, and phase split.";
+    if (parameterId == "macro_ephemeris") {
+        return "Sky motion: astrological modulation depth across delay and reverb.";
     }
-    if (parameterId == "root_offset") {
-        return "Transposes the effective root in semitones.";
+    if (parameterId == "macro_fate") {
+        return "Tape loop law: echo time, repeats, wow/flutter, and saturation.";
     }
-    if (parameterId == "mix") {
-        return "Sets the wet tape echo and space reverb blend. Live input is only audible when Input Monitor is on.";
+    if (parameterId == "macro_void") {
+        return "Space character: verb size, darkness, and reverb emphasis.";
     }
-    if (parameterId == "delay_level") {
-        return "Sets tape echo level, including orbit-derived delay taps.";
-    }
-    if (parameterId == "reverb_level") {
-        return "Sets the modulated space reverb return level.";
-    }
-    if (parameterId == "delay_time") {
-        return "Sets the base tape delay time before orbit/sign modulation.";
-    }
-    if (parameterId == "feedback") {
-        return "Sets tape echo regeneration and repeat density.";
-    }
-    if (parameterId == "space") {
-        return "Sets reverb tank size, diffusion, and decay weight.";
-    }
-    if (parameterId == "tone") {
-        return "Sets tape/reverb feedback brightness and damping.";
-    }
-    if (parameterId == "pluck_timbre") {
-        return "Darkens or brightens Karplus-Strong ring plucks while preserving planet variation.";
-    }
-    if (parameterId == "pluck_level") {
-        return "Sets ring pluck loudness independently from the drone level.";
-    }
-    if (parameterId == "pluck_octave") {
-        return "Transposes planet-derived ring pluck pitch in octaves.";
-    }
-    if (parameterId == "mod_depth") {
-        return "Sets how strongly the sky modulates tape delay time, taps, and reverb motion.";
-    }
-    if (parameterId == "wow_flutter") {
-        return "Sets tape wow and flutter pitch wobble in the delay line.";
-    }
-    if (parameterId == "drive") {
-        return "Sets tape-style saturation before delay feedback is written.";
-    }
-    if (parameterId == "astro_amount") {
-        return "Sets the overall depth of astrological modulation across delay and reverb.";
+    if (parameterId == "macro_pulse") {
+        return "Ring plucks: timbre and octave spread (Euclidean rate/wet are separate).";
     }
     if (parameterId == "euclid_rate") {
         return "Sets the Euclidean pluck sequencer step rate in steps per second.";
@@ -172,38 +138,33 @@ juce::String sliderTooltip(const juce::String& parameterId)
     if (parameterId == "euclid_wet") {
         return "Blends Euclidean plucks from direct dry to fully sent through tape delay and reverb.";
     }
+    if (parameterId == "macro_root") {
+        return "Transposes the harmonic root in semitones.";
+    }
     if (parameterId == "output_gain") {
-        return "Sets final output level.";
+        return "Final output trim after the Substance macro.";
     }
     return {};
 }
 
-// Formats slider readouts in musical units instead of raw float precision.
+// Formats macro readouts as musical percentages or semitones.
 juce::String sliderText(const juce::String& parameterId, double value)
 {
-    if (parameterId == "delay_time") {
-        return juce::String(value, 0) + " ms";
+    if (parameterId == "macro_root") {
+        const int semitones = static_cast<int>(std::round((value - 0.5) * 24.0));
+        return (semitones >= 0 ? "+" : "") + juce::String(semitones) + " st";
     }
     if (parameterId == "output_gain") {
         return juce::String(value, 2) + "x";
     }
-    if (parameterId == "root_offset") {
-        return (value >= 0.0 ? "+" : "") + juce::String(value, 0) + " st";
-    }
-    if (parameterId == "pluck_timbre") {
-        return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
-    }
-    if (parameterId == "pluck_level") {
-        return juce::String(value, 2) + "x";
-    }
-    if (parameterId == "pluck_octave") {
-        return (value >= 0.0 ? "+" : "") + juce::String(value, 0) + " oct";
-    }
-    if (parameterId == "mod_depth" || parameterId == "wow_flutter" || parameterId == "drive" || parameterId == "astro_amount" || parameterId == "euclid_wet") {
-        return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
-    }
     if (parameterId == "euclid_rate") {
         return juce::String(value, 1) + " st/s";
+    }
+    if (parameterId == "euclid_wet") {
+        return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
+    }
+    if (parameterId.startsWith("macro_")) {
+        return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
     }
     return juce::String(value, 2);
 }
@@ -1126,32 +1087,17 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
 
     addAndMakeVisible(*orbitMap);
 
-    addSlider("drone_level", "Drone");
-    addSlider("capture_level", "Capture");
-    addSlider("harmonic_spread", "Harmonics");
-    addSlider("aspect_depth", "Aspects");
-    addSlider("root_offset", "Root Shift");
-    addSlider("mix", "Wet");
-    addSlider("delay_level", "Tape Echo");
-    addSlider("reverb_level", "Space Verb");
-    addSlider("delay_time", "Echo Time");
-    addSlider("feedback", "Repeats");
-    addSlider("space", "Verb Size");
-    addSlider("tone", "Tape Tone");
-    addSlider("mod_depth", "Orbit Mod");
-    addSlider("wow_flutter", "Wow/Flutter");
-    addSlider("drive", "Tape Drive");
-    addSlider("astro_amount", "Astro Depth");
-    addSlider("euclid_rate", "Euclid Rate");
-    addSlider("euclid_wet", "Euclid Wet");
-    addSlider("pluck_level", "Pluck Level");
-    addSlider("pluck_timbre", "Pluck Tone");
-    addSlider("pluck_octave", "Pluck Oct");
-    addSlider("output_gain", "Output");
-
-    for (int index = 5; index < sliders.size(); ++index) {
-        sliders[index]->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 58, 14);
-    }
+    addSlider("macro_choir", "Choir", SliderLayout::Inspector);
+    addSlider("macro_mneme", "Mneme", SliderLayout::Inspector);
+    addSlider("macro_ephemeris", "Ephemeris", SliderLayout::Inspector);
+    addSlider("macro_root", "Root Drift", SliderLayout::Inspector);
+    addSlider("euclid_rate", "Rate", SliderLayout::Inspector);
+    addSlider("euclid_wet", "Wet", SliderLayout::Inspector);
+    addSlider("macro_substance", "Substance", SliderLayout::Bottom);
+    addSlider("macro_fate", "Fate", SliderLayout::Bottom);
+    addSlider("macro_void", "Void", SliderLayout::Bottom);
+    addSlider("macro_pulse", "Ring", SliderLayout::Bottom);
+    addSlider("output_gain", "Output", SliderLayout::Bottom);
 
     droneHoldButton.setButtonText("Drone On");
     droneHoldButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
@@ -1242,6 +1188,26 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     };
     addAndMakeVisible(astroModeBox);
 
+    historicalPresetBox.addItem("Custom date", 1);
+    for (std::size_t index = 0; index < astro::historicalPresets().size(); ++index) {
+        const auto& preset = astro::historicalPresets()[index];
+        historicalPresetBox.addItem(juce::String(preset.label.data()), static_cast<int>(index + 2));
+    }
+    historicalPresetBox.setTooltip(
+        "Recalls approximate planet positions for a historical UTC moment. Switches to Manual Date.");
+    historicalPresetBox.onChange = [this] {
+        if (syncingHistoricalPresetUi) {
+            return;
+        }
+        const int selectedId = historicalPresetBox.getSelectedId();
+        if (selectedId <= 1) {
+            return;
+        }
+        applyHistoricalPreset(static_cast<std::size_t>(selectedId - 2));
+    };
+    addAndMakeVisible(historicalPresetBox);
+    syncHistoricalPresetBox();
+
     setSize(1220, 760);
     startTimerHz(12);
 }
@@ -1313,24 +1279,39 @@ void AstralReverberationsEditor::resized()
     normalButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
     fastButton.setBounds(speedRow.reduced(2, 0));
 
+    historicalPresetBox.setBounds(inspector.removeFromTop(34).reduced(8, 2));
+
     auto resetRow = inspector.removeFromTop(34).reduced(8, 2);
     resetPlanetButton.setBounds(resetRow.removeFromLeft(resetRow.getWidth() / 2).reduced(2, 0));
     resetOrbitsButton.setBounds(resetRow.reduced(2, 0));
 
     inspector.removeFromTop(kInputMeterHeight);
 
-    for (int index = 0; index < 5; ++index) {
-        auto cell = inspector.removeFromTop(54).reduced(8);
-        labels[index]->setBounds(cell.removeFromTop(16));
-        sliders[index]->setBounds(cell);
+    constexpr int kInspectorLabelWidth = 84;
+    for (int index = 0; index < 4; ++index) {
+        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(8, 3);
+        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
+        sliders[index]->setBounds(row);
     }
-    droneHoldButton.setBounds(inspector.removeFromTop(26).reduced(8, 2));
-    inputMonitorButton.setBounds(inspector.removeFromTop(26).reduced(8, 2));
-    captureButton.setBounds(inspector.removeFromTop(26).reduced(8, 2));
-    euclidButton.setBounds(inspector.removeFromTop(26).reduced(8, 2));
+
+    auto toggleGrid = inspector.removeFromTop(58).reduced(8, 2);
+    const int toggleColumnWidth = toggleGrid.getWidth() / 2;
+    const int toggleRowHeight = toggleGrid.getHeight() / 2;
+    auto toggleTopRow = toggleGrid.removeFromTop(toggleRowHeight);
+    droneHoldButton.setBounds(toggleTopRow.removeFromLeft(toggleColumnWidth).reduced(2, 1));
+    inputMonitorButton.setBounds(toggleTopRow.reduced(2, 1));
+    captureButton.setBounds(toggleGrid.removeFromTop(toggleRowHeight).removeFromLeft(toggleColumnWidth).reduced(2, 1));
+    euclidButton.setBounds(toggleGrid.reduced(2, 1));
+
+    for (int index = 4; index < 6; ++index) {
+        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(8, 3);
+        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
+        sliders[index]->setBounds(row);
+    }
+
     freezeButton.setBounds(inspector.removeFromTop(26).reduced(8, 2));
 
-    const int bottomSliderStart = 5;
+    const int bottomSliderStart = 6;
     const int bottomSliderCount = sliders.size() - bottomSliderStart;
     const int cellWidth = bottom.getWidth() / std::max(1, bottomSliderCount);
     for (int index = bottomSliderStart; index < sliders.size(); ++index) {
@@ -1375,25 +1356,76 @@ void AstralReverberationsEditor::updateKeyboardControls()
     }
 }
 
-void AstralReverberationsEditor::addSlider(const char* parameterId, const juce::String& labelText)
+static float defaultSliderValue(const juce::String& parameterId)
+{
+    if (parameterId == "macro_substance") {
+        return 0.42f;
+    }
+    if (parameterId == "macro_mneme") {
+        return 0.38f;
+    }
+    if (parameterId == "macro_choir") {
+        return 0.52f;
+    }
+    if (parameterId == "macro_ephemeris") {
+        return 0.5f;
+    }
+    if (parameterId == "macro_fate") {
+        return 0.48f;
+    }
+    if (parameterId == "macro_void") {
+        return 0.54f;
+    }
+    if (parameterId == "macro_pulse") {
+        return 0.58f;
+    }
+    if (parameterId == "macro_root") {
+        return 0.5f;
+    }
+    if (parameterId == "euclid_rate") {
+        return 4.0f;
+    }
+    if (parameterId == "euclid_wet") {
+        return 1.0f;
+    }
+    if (parameterId == "output_gain") {
+        return 1.0f;
+    }
+    return 0.0f;
+}
+
+void AstralReverberationsEditor::addSlider(const char* parameterId, const juce::String& labelText, SliderLayout layout)
 {
     const juce::String parameter(parameterId);
     auto* label = labels.add(new juce::Label());
     label->setText(labelText, juce::dontSendNotification);
-    label->setJustificationType(juce::Justification::centred);
+    label->setJustificationType(layout == SliderLayout::Inspector ? juce::Justification::centredLeft
+                                                                  : juce::Justification::centred);
     label->setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
-    label->setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    label->setFont(juce::FontOptions(layout == SliderLayout::Inspector ? 12.0f : 11.0f, juce::Font::bold));
     label->setTooltip(sliderTooltip(parameter));
     addAndMakeVisible(label);
 
     auto* slider = sliders.add(new juce::Slider());
-    slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 17);
-    slider->setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(105, 198, 212));
-    slider->setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(52, 58, 66));
-    slider->setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+    if (layout == SliderLayout::Inspector) {
+        slider->setSliderStyle(juce::Slider::LinearHorizontal);
+        slider->setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
+        slider->setColour(juce::Slider::trackColourId, juce::Colour(52, 58, 66));
+        slider->setColour(juce::Slider::backgroundColourId, juce::Colour(25, 27, 31));
+        slider->setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+    } else {
+        slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 58, 14);
+        slider->setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(105, 198, 212));
+        slider->setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(52, 58, 66));
+        slider->setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+    }
     slider->setColour(juce::Slider::textBoxTextColourId, juce::Colour(235, 239, 242));
+    slider->setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(25, 27, 31));
     slider->setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    slider->setScrollWheelEnabled(true);
+    slider->setPopupDisplayEnabled(true, true, this);
+    slider->setDoubleClickReturnValue(true, static_cast<double>(defaultSliderValue(parameter)));
     slider->textFromValueFunction = [parameter](double value) {
         return sliderText(parameter, value);
     };
@@ -1428,8 +1460,33 @@ void AstralReverberationsEditor::updateRootNoteBox()
 void AstralReverberationsEditor::timerCallback()
 {
     updateRootNoteBox();
+    syncHistoricalPresetBox();
     updateStatus();
     repaint();
+}
+
+void AstralReverberationsEditor::applyHistoricalPreset(std::size_t presetIndex)
+{
+    const auto presets = astro::historicalPresets();
+    if (presetIndex >= presets.size()) {
+        return;
+    }
+
+    audioProcessor.setManualJulianDay(astro::julianDayForPreset(presets[presetIndex]));
+    audioProcessor.setAstroMode(AstralReverberationsAudioProcessor::AstroMode::ManualDate);
+    astroModeBox.setSelectedId(static_cast<int>(AstralReverberationsAudioProcessor::AstroMode::ManualDate) + 1, juce::dontSendNotification);
+    syncHistoricalPresetBox();
+}
+
+void AstralReverberationsEditor::syncHistoricalPresetBox()
+{
+    const juce::ScopedValueSetter<bool> guard(syncingHistoricalPresetUi, true);
+    const int customId = 1;
+    if (const auto match = astro::findPresetIndexForJulianDay(audioProcessor.getManualJulianDay())) {
+        historicalPresetBox.setSelectedId(static_cast<int>(*match + 2), juce::dontSendNotification);
+        return;
+    }
+    historicalPresetBox.setSelectedId(customId, juce::dontSendNotification);
 }
 
 void AstralReverberationsEditor::updateStatus()
@@ -1438,11 +1495,27 @@ void AstralReverberationsEditor::updateStatus()
     const auto root = noteName(audioProcessor.getDroneRootNote());
     const int inputPercent = static_cast<int>(std::round(juce::jlimit(0.0f, 1.0f, audioProcessor.getInputLevel()) * 100.0f));
     const auto inputText = "  In " + juce::String(inputPercent) + "%";
+    juce::String skyText;
+    switch (audioProcessor.getAstroMode()) {
+        case AstralReverberationsAudioProcessor::AstroMode::Now:
+            skyText = "Sky Now";
+            break;
+        case AstralReverberationsAudioProcessor::AstroMode::ManualDate:
+            if (const auto match = astro::findPresetIndexForJulianDay(audioProcessor.getManualJulianDay())) {
+                skyText = juce::String(astro::historicalPresets()[*match].label.data());
+            } else {
+                skyText = "Sky Manual";
+            }
+            break;
+        case AstralReverberationsAudioProcessor::AstroMode::SimulatedOrbit:
+            skyText = "Sky Sim";
+            break;
+    }
     const auto rootText = audioProcessor.isDroneHeld()
-        ? "Gate Hold  Root " + root + "  " + source + inputText
+        ? skyText + "  Gate Hold  Root " + root + "  " + source + inputText
         : audioProcessor.isDroneGateOpen()
-            ? "Gate Live  Root " + root + "  " + source + inputText
-        : "Gate Idle  Root " + root + "  " + source + inputText;
+            ? skyText + "  Gate Live  Root " + root + "  " + source + inputText
+        : skyText + "  Gate Idle  Root " + root + "  " + source + inputText;
     statusLabel.setText(rootText, juce::dontSendNotification);
 }
 
@@ -1455,6 +1528,7 @@ void AstralReverberationsEditor::drawInputMeter(juce::Graphics& graphics)
     bounds.removeFromBottom(10);
     auto inspector = bounds.removeFromRight(kInspectorWidth);
 
+    inspector.removeFromTop(34);
     inspector.removeFromTop(34);
     inspector.removeFromTop(34);
     inspector.removeFromTop(34);

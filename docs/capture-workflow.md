@@ -6,7 +6,7 @@ Astral Reverberations has two capture paths. Both use live stereo input, but the
 
 1. Send audio into the standalone app or plugin.
 2. Turn on `Capture`.
-3. Raise `Capture` level.
+3. Raise the **Mneme** macro (capture memory).
 4. Hold a number key to feed a planet tail:
    - `1` Sun
    - `2` Moon
@@ -45,7 +45,7 @@ Shorter-period bodies create shorter tails. Longer-period planets create longer 
 
 The current capture implementation is conservative:
 
-- `Capture` level controls both buffer scanning and orbit-tail excitation.
+- **Mneme** macro controls both buffer scanning and orbit-tail excitation.
 - Planet layer amplitude also scales the captured signal.
 - The manual orbit-tail signal is mixed at a reduced gain before the main delay/reverb.
 - The captured buffer scan path is only `22%` of `Capture * layer amplitude`.

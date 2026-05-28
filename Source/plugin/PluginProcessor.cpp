@@ -1,5 +1,6 @@
 #include "plugin/PluginProcessor.h"
 
+#include "plugin/MacroMapping.h"
 #include "plugin/PluginEditor.h"
 
 #include <cmath>
@@ -62,6 +63,20 @@ bool euclideanHit(int step, int pulses, int steps)
     pulses = std::clamp(pulses, 0, steps);
     const int wrappedStep = ((step % steps) + steps) % steps;
     return ((wrappedStep + 1) * pulses) / steps != (wrappedStep * pulses) / steps;
+}
+
+MacroControls readMacroControls(const juce::AudioProcessorValueTreeState& state)
+{
+    MacroControls macros;
+    macros.substance = getFloatParameter(state, "macro_substance");
+    macros.mneme = getFloatParameter(state, "macro_mneme");
+    macros.choir = getFloatParameter(state, "macro_choir");
+    macros.ephemeris = getFloatParameter(state, "macro_ephemeris");
+    macros.fate = getFloatParameter(state, "macro_fate");
+    macros.void_ = getFloatParameter(state, "macro_void");
+    macros.pulse = getFloatParameter(state, "macro_pulse");
+    macros.root = getFloatParameter(state, "macro_root");
+    return macros;
 }
 
 } // namespace
@@ -321,10 +336,12 @@ bool AstralReverberationsAudioProcessor::isManualOrbitTailActive(astro::PlanetId
 
 void AstralReverberationsAudioProcessor::queueReverbTankTap(std::size_t planetIndex, const astro::AstroHarmonicLayer& layer, float wetAmount)
 {
-    float frequencyHz = midiNoteToFrequency(getDroneRootNote() + static_cast<int>(std::round(getFloatParameter(parameterState, "root_offset"))));
-    const float harmonicSpread = std::clamp(getFloatParameter(parameterState, "harmonic_spread"), 0.0f, 1.0f);
+    const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
+    float frequencyHz = midiNoteToFrequency(
+        getDroneRootNote() + static_cast<int>(std::round(resolved.rootOffsetSemitones)));
+    const float harmonicSpread = std::clamp(resolved.harmonicSpread, 0.0f, 1.0f);
     const float ratio = std::clamp(1.0f + (layer.ratio - 1.0f) * harmonicSpread, 0.125f, 12.0f);
-    const float octaveOffset = getFloatParameter(parameterState, "pluck_octave");
+    const float octaveOffset = resolved.pluckOctave;
     frequencyHz = std::clamp(frequencyHz * ratio * centsToRatio(layer.detuneCents) * std::pow(2.0f, octaveOffset), 35.0f, 2400.0f);
 
     pendingReverbTankTapPan.store(std::clamp(layer.pan, -1.0f, 1.0f), std::memory_order_relaxed);
@@ -466,35 +483,38 @@ bool AstralReverberationsAudioProcessor::hasPlanetLongitudeOffset(astro::PlanetI
 
 dsp::AstralParameters AstralReverberationsAudioProcessor::readParameters() const
 {
+    const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
     dsp::AstralParameters parameters;
-    parameters.mix = getFloatParameter(parameterState, "mix");
-    parameters.delayLevel = getFloatParameter(parameterState, "delay_level");
-    parameters.reverbLevel = getFloatParameter(parameterState, "reverb_level");
-    parameters.delayTimeMs = getFloatParameter(parameterState, "delay_time");
-    parameters.feedback = getFloatParameter(parameterState, "feedback");
-    parameters.space = getFloatParameter(parameterState, "space");
-    parameters.tone = getFloatParameter(parameterState, "tone");
-    parameters.modDepth = getFloatParameter(parameterState, "mod_depth");
-    parameters.wowFlutter = getFloatParameter(parameterState, "wow_flutter");
-    parameters.drive = getFloatParameter(parameterState, "drive");
-    parameters.astroAmount = getFloatParameter(parameterState, "astro_amount");
+    parameters.mix = resolved.mix;
+    parameters.delayLevel = resolved.delayLevel;
+    parameters.reverbLevel = resolved.reverbLevel;
+    parameters.delayTimeMs = resolved.delayTimeMs;
+    parameters.feedback = resolved.feedback;
+    parameters.space = resolved.space;
+    parameters.tone = resolved.tone;
+    parameters.modDepth = resolved.modDepth;
+    parameters.wowFlutter = resolved.wowFlutter;
+    parameters.drive = resolved.drive;
+    parameters.astroAmount = resolved.astroAmount;
     parameters.astroSpeed = getFloatParameter(parameterState, "astro_speed");
-    parameters.pluckLevel = getFloatParameter(parameterState, "pluck_level");
-    parameters.pluckTimbre = getFloatParameter(parameterState, "pluck_timbre");
+    parameters.pluckLevel = resolved.pluckLevel;
+    parameters.pluckTimbre = resolved.pluckTimbre;
     parameters.freeze = getFloatParameter(parameterState, "freeze") >= 0.5f;
     parameters.inputMonitor = getFloatParameter(parameterState, "input_monitor") >= 0.5f;
-    parameters.outputGain = getFloatParameter(parameterState, "output_gain");
+    parameters.outputGain = resolved.outputGain;
     return parameters;
 }
 
 dsp::PlanetaryDroneParameters AstralReverberationsAudioProcessor::readDroneParameters() const
 {
+    const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
     dsp::PlanetaryDroneParameters parameters;
-    parameters.droneLevel = getFloatParameter(parameterState, "drone_level");
-    parameters.captureLevel = getFloatParameter(parameterState, "capture_level");
-    parameters.harmonicSpread = getFloatParameter(parameterState, "harmonic_spread");
-    parameters.aspectDepth = getFloatParameter(parameterState, "aspect_depth");
-    parameters.rootFrequencyHz = midiNoteToFrequency(getDroneRootNote() + static_cast<int>(std::round(getFloatParameter(parameterState, "root_offset"))));
+    parameters.droneLevel = resolved.droneLevel;
+    parameters.captureLevel = resolved.captureLevel;
+    parameters.harmonicSpread = resolved.harmonicSpread;
+    parameters.aspectDepth = resolved.aspectDepth;
+    parameters.rootFrequencyHz = midiNoteToFrequency(
+        getDroneRootNote() + static_cast<int>(std::round(resolved.rootOffsetSemitones)));
     parameters.gate = isDroneGateOpen();
     parameters.captureEnabled = getFloatParameter(parameterState, "capture_enable") >= 0.5f;
     for (std::size_t index = 0; index < parameters.manualLayerGates.size(); ++index) {
@@ -596,6 +616,14 @@ void AstralReverberationsAudioProcessor::applyPlanetLongitudeOffsets(astro::Astr
 juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> parameters;
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_substance", "Substance", range(0.0f, 1.0f), 0.42f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_mneme", "Mneme", range(0.0f, 1.0f), 0.38f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_choir", "Choir", range(0.0f, 1.0f), 0.52f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_ephemeris", "Ephemeris", range(0.0f, 1.0f), 0.5f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_fate", "Fate", range(0.0f, 1.0f), 0.48f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_void", "Void", range(0.0f, 1.0f), 0.54f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_pulse", "Pulse", range(0.0f, 1.0f), 0.58f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_root", "Root Drift", range(0.0f, 1.0f), 0.5f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("mix", "Wet Mix", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("delay_level", "Tape Echo Level", range(0.0f, 1.0f), 0.45f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_level", "Space Reverb Level", range(0.0f, 1.0f), 0.55f));

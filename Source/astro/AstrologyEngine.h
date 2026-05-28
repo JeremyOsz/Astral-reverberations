@@ -25,6 +25,8 @@ public:
     static Quality qualityForSign(ZodiacSign sign);
     /// Converts Unix seconds to a Julian day for deterministic snapshot generation.
     static double julianDayFromUnixSeconds(double unixSeconds);
+    /// Converts a proleptic Gregorian UTC date-time into a Julian day.
+    static double julianDayFromUtc(int year, int month, int day, int hour = 12, int minute = 0, int second = 0);
     /// Reads the system clock as Unix seconds for Now mode.
     static double unixSecondsFromSystemClock();
 

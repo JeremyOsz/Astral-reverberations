@@ -14,6 +14,7 @@ option(ASTRAL_BUILD_TESTS "Build the portable unit test executable" ON)
 
 add_library(AstralCore STATIC
     Source/astro/AstrologyEngine.cpp
+    Source/astro/HistoricalPresets.cpp
     Source/astro/AstroMapper.cpp
     Source/dsp/AstralReverbDelay.cpp
     Source/dsp/PlanetaryDrone.cpp)
@@ -28,8 +29,10 @@ if (ASTRAL_BUILD_TESTS)
     enable_testing()
 
     add_executable(AstralCoreTests
+        Source/plugin/MacroMapping.cpp
         tests/AstroTests.cpp
         tests/DspTests.cpp
+        tests/MacroMappingTests.cpp
         tests/TestMain.cpp)
 
     target_link_libraries(AstralCoreTests PRIVATE AstralCore)
@@ -70,6 +73,7 @@ if (ASTRAL_BUILD_PLUGIN)
 
     target_sources(AstralReverberationsPlugin
         PRIVATE
+            Source/plugin/MacroMapping.cpp
             Source/plugin/PluginProcessor.cpp
             Source/plugin/PluginEditor.cpp)
 
