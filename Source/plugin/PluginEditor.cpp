@@ -1302,7 +1302,7 @@ void AstralReverberationsEditor::resized()
     auto toggleTopRow = toggleGrid.removeFromTop(toggleRowHeight);
     droneHoldButton.setBounds(toggleTopRow.removeFromLeft(toggleColumnWidth).reduced(2, 1));
     inputMonitorButton.setBounds(toggleTopRow.reduced(2, 1));
-    captureButton.setBounds(toggleGrid.removeFromTop(toggleRowHeight).removeFromLeft(toggleColumnWidth).reduced(2, 1));
+    captureButton.setBounds(toggleGrid.removeFromLeft(toggleColumnWidth).reduced(2, 1));
     euclidButton.setBounds(toggleGrid.reduced(2, 1));
 
     for (int index = 4; index < 6; ++index) {
