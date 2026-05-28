@@ -1191,10 +1191,12 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     historicalPresetBox.addItem("Custom date", 1);
     for (std::size_t index = 0; index < astro::historicalPresets().size(); ++index) {
         const auto& preset = astro::historicalPresets()[index];
-        historicalPresetBox.addItem(juce::String(preset.label.data()), static_cast<int>(index + 2));
+        historicalPresetBox.addItem(
+            juce::String(preset.label.data()) + juce::String::charToString(0x00b7) + " " + juce::String(preset.keyName.data()),
+            static_cast<int>(index + 2));
     }
     historicalPresetBox.setTooltip(
-        "Recalls approximate planet positions for a historical UTC moment. Switches to Manual Date.");
+        "Recalls planet positions and a curated root key for a historical UTC moment. Switches to Manual Date.");
     historicalPresetBox.onChange = [this] {
         if (syncingHistoricalPresetUi) {
             return;
@@ -1472,9 +1474,13 @@ void AstralReverberationsEditor::applyHistoricalPreset(std::size_t presetIndex)
         return;
     }
 
-    audioProcessor.setManualJulianDay(astro::julianDayForPreset(presets[presetIndex]));
+    const auto& preset = presets[presetIndex];
+    audioProcessor.setManualJulianDay(astro::julianDayForPreset(preset));
+    setParameterValue("root_note", static_cast<float>(preset.rootMidiNote));
+    setParameterValue("macro_root", 0.5f);
     audioProcessor.setAstroMode(AstralReverberationsAudioProcessor::AstroMode::ManualDate);
     astroModeBox.setSelectedId(static_cast<int>(AstralReverberationsAudioProcessor::AstroMode::ManualDate) + 1, juce::dontSendNotification);
+    updateRootNoteBox();
     syncHistoricalPresetBox();
 }
 

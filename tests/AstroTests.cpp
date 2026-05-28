@@ -26,6 +26,8 @@ void runAstroTests()
         const double julianDay = julianDayForPreset(preset);
         require(std::isfinite(julianDay), "historical preset Julian day is finite");
         require(findPresetIndexForJulianDay(julianDay).has_value(), "each preset round-trips through lookup");
+        require(preset.rootMidiNote >= 24 && preset.rootMidiNote <= 84, "historical preset root is in playable range");
+        require(!preset.keyName.empty(), "historical preset has a key label");
     }
 
     AstrologyEngine engine;

@@ -7,7 +7,7 @@
 
 namespace astral::astro {
 
-/// One fixed UTC moment whose planet layout is recalled in Manual Date mode.
+/// One fixed UTC moment whose planet layout and drone root are recalled in Manual Date mode.
 struct HistoricalEventPreset {
     std::string_view label;
     int year{};
@@ -16,6 +16,8 @@ struct HistoricalEventPreset {
     int hour{};
     int minute{};
     int second{};
+    int rootMidiNote{};
+    std::string_view keyName;
 };
 
 /// Returns every built-in historical sky preset.
