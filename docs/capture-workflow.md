@@ -7,7 +7,7 @@ Astral Reverberations has two capture paths. Both use live stereo input, but the
 1. Send audio into the standalone app or plugin.
 2. Turn on `Capture`.
 3. Raise the **Mneme** macro (capture memory).
-4. Hold a number key to feed a planet tail:
+4. Hold a number key (`1`–`0`) or MIDI note **36–45** (C2–A2, Sun→Pluto) to feed a planet tail:
    - `1` Sun
    - `2` Moon
    - `3` Mercury
@@ -31,7 +31,7 @@ When `Capture` is on, incoming stereo audio is written into a short circular cap
 The louder, Sarum-inspired path is the planet tail capture. It needs two things at the same time:
 
 - `Capture` is on.
-- A planet number key is held.
+- A planet number key or MIDI tail note (36–45) is held (MIDI tail notes auto-arm capture).
 
 While the key is held, input excites that planet's reverb tail buffer. When the key is released, the buffer continues to ring out with a decay length based on the planet's orbit.
 
@@ -69,5 +69,9 @@ The orbit rings show capture state:
 - `Capture`: arms input capture and planet tail excitation.
 - `Freeze`: holds the main delay/reverb feedback path, not the planet tail buffers.
 - Number keys: momentary planet-tail capture gates.
+- `Q`–`P`: one-shot reverb tank plucks per planet (see `docs/midi-control.md`).
+- `A`–`;`: toggle planet mute.
 - Double-click planet: mute/unmute that planet layer.
 - `Reset Planet` / `Reset Orbits`: reset position offsets only; they do not clear captured audio.
+
+For MIDI note/CC behavior, host automation, and a roadmap for hardware control, see `docs/midi-control.md`.

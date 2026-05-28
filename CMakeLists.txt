@@ -30,9 +30,11 @@ if (ASTRAL_BUILD_TESTS)
 
     add_executable(AstralCoreTests
         Source/plugin/MacroMapping.cpp
+        Source/plugin/MidiMapping.cpp
         tests/AstroTests.cpp
         tests/DspTests.cpp
         tests/MacroMappingTests.cpp
+        tests/MidiMappingTests.cpp
         tests/TestMain.cpp)
 
     target_link_libraries(AstralCoreTests PRIVATE AstralCore)
@@ -74,6 +76,7 @@ if (ASTRAL_BUILD_PLUGIN)
     target_sources(AstralReverberationsPlugin
         PRIVATE
             Source/plugin/MacroMapping.cpp
+            Source/plugin/MidiMapping.cpp
             Source/plugin/PluginProcessor.cpp
             Source/plugin/PluginEditor.cpp)
 

@@ -16,6 +16,10 @@ The astrology engine is intentionally offline. It uses approximate orbital perio
 
 Capture is an armed input-recording mode. For audible orbit-tail capture, turn on `Capture` and hold a planet number key (`1-0`) while audio is entering the plugin. See `docs/capture-workflow.md` for the full signal path and troubleshooting notes.
 
+## MIDI and Performance Control
+
+MIDI input currently opens the drone gate and (optionally) sets the harmonic root from held notes. Planet tails, tank plucks, mutes, and orbit edits are keyboard/mouse-only. See `docs/midi-control.md` for the full parameter map, legacy automation IDs, and a recommended CC/note layout for better hardware control.
+
 ## Build The Core Tests
 
 The core tests do not need JUCE or network access:

@@ -86,8 +86,8 @@ public:
     bool hasPlanetLongitudeOffset(astro::PlanetId planet) const;
     /// Opens or closes the momentary keyboard gate for one planet tail.
     void setManualOrbitTailGate(astro::PlanetId planet, bool active);
-    /// Queues a one-shot excitation into the main reverb tank from an orbit-ring click.
-    void tapOrbitReverbTank(astro::PlanetId planet);
+    /// Queues a one-shot excitation into the main reverb tank from an orbit-ring click or MIDI pluck.
+    void tapOrbitReverbTank(astro::PlanetId planet, float wetAmount = 1.0f);
     /// Returns true when a planet tail key is held and the planet is not muted.
     bool isManualOrbitTailActive(astro::PlanetId planet) const;
     /// Returns the latest smoothed captured-tail level for a planet.
@@ -123,7 +123,7 @@ private:
     mutable juce::CriticalSection astroStateLock;
     juce::AudioBuffer<float> processingBuffer;
     juce::AudioBuffer<float> inputCopyBuffer;
-    std::array<bool, 128> heldMidiNotes{};
+    std::array<bool, 128> heldDroneGateNotes{};
     std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> manualOrbitTailGates{};
     std::array<std::atomic<bool>, static_cast<std::size_t>(astro::PlanetId::Count)> planetMutes{};
     std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> orbitTailLevels{};
@@ -144,6 +144,8 @@ private:
     double currentSampleRate = 44100.0;
     double euclideanStepAccumulator = 0.0;
     bool droneGateOpen = false;
+    bool midiSustainPedalDown = false;
+    float midiPitchBendSemitones = 0.0f;
     int currentMidiRootNote = 45;
 
     /// Reads APVTS effect parameters into the JUCE-free delay/reverb parameter struct.
@@ -152,8 +154,16 @@ private:
     dsp::PlanetaryDroneParameters readDroneParameters() const;
     /// Advances or reads the active orbit source and maps it into modulation frames.
     astro::AstroModulationFrame nextAstroFrame(int samplesInBlock);
-    /// Tracks held MIDI notes and chooses the current MIDI root.
-    void updateMidiGate(const juce::MidiBuffer& midiMessages);
+    /// Handles MIDI notes, CC, pitch bend, and sustain for performance control.
+    void processMidiInput(const juce::MidiBuffer& midiMessages);
+    /// Applies a MIDI CC value to a normalized APVTS parameter.
+    void setParameterFromMidiCc(const char* parameterId, int ccValue);
+    /// Applies a MIDI CC threshold to a boolean APVTS parameter.
+    void setBoolParameterFromMidiCc(const char* parameterId, int ccValue);
+    /// Recomputes drone gate and root from held notes and sustain pedal.
+    void refreshMidiVoiceState();
+    /// Root frequency in Hz including macro offset and pitch bend.
+    float getDroneRootFrequencyHz() const;
     /// Applies user longitude offsets to a freshly generated orbit snapshot.
     void applyPlanetLongitudeOffsets(astro::AstroSnapshot& snapshot) const;
     /// Advances the planet-position Euclidean pluck sequencer.

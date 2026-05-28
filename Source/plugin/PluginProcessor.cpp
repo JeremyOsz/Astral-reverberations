@@ -1,6 +1,7 @@
 #include "plugin/PluginProcessor.h"
 
 #include "plugin/MacroMapping.h"
+#include "plugin/MidiMapping.h"
 #include "plugin/PluginEditor.h"
 
 #include <cmath>
@@ -33,6 +34,11 @@ float getFloatParameter(const juce::AudioProcessorValueTreeState& state, const c
 float midiNoteToFrequency(int note)
 {
     return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
+}
+
+float midiNoteToFrequency(float note)
+{
+    return 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
 }
 
 float centsToRatio(float cents)
@@ -119,6 +125,10 @@ void AstralReverberationsAudioProcessor::releaseResources()
 {
     effect.reset();
     drone.reset();
+    heldDroneGateNotes.fill(false);
+    midiSustainPedalDown = false;
+    midiPitchBendSemitones = 0.0f;
+    droneGateOpen = false;
 }
 
 bool AstralReverberationsAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -132,7 +142,7 @@ bool AstralReverberationsAudioProcessor::isBusesLayoutSupported(const BusesLayou
 void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    updateMidiGate(midiMessages);
+    processMidiInput(midiMessages);
 
     const auto totalInputChannels = getTotalNumInputChannels();
     const auto totalOutputChannels = getTotalNumOutputChannels();
@@ -314,17 +324,17 @@ void AstralReverberationsAudioProcessor::setManualOrbitTailGate(astro::PlanetId 
     manualOrbitTailGates[static_cast<std::size_t>(planet)].store(active, std::memory_order_relaxed);
 }
 
-void AstralReverberationsAudioProcessor::tapOrbitReverbTank(astro::PlanetId planet)
+void AstralReverberationsAudioProcessor::tapOrbitReverbTank(astro::PlanetId planet, float wetAmount)
 {
     const auto index = static_cast<std::size_t>(planet);
-    if (index >= planetMutes.size()) {
+    if (index >= planetMutes.size() || isPlanetMuted(planet)) {
         return;
     }
 
     {
         const juce::ScopedLock lock(astroStateLock);
         if (index < currentDroneFrame.layers.size()) {
-            queueReverbTankTap(index, currentDroneFrame.layers[index], 1.0f);
+            queueReverbTankTap(index, currentDroneFrame.layers[index], wetAmount);
         }
     }
 }
@@ -337,8 +347,7 @@ bool AstralReverberationsAudioProcessor::isManualOrbitTailActive(astro::PlanetId
 void AstralReverberationsAudioProcessor::queueReverbTankTap(std::size_t planetIndex, const astro::AstroHarmonicLayer& layer, float wetAmount)
 {
     const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
-    float frequencyHz = midiNoteToFrequency(
-        getDroneRootNote() + static_cast<int>(std::round(resolved.rootOffsetSemitones)));
+    float frequencyHz = getDroneRootFrequencyHz();
     const float harmonicSpread = std::clamp(resolved.harmonicSpread, 0.0f, 1.0f);
     const float ratio = std::clamp(1.0f + (layer.ratio - 1.0f) * harmonicSpread, 0.125f, 12.0f);
     const float octaveOffset = resolved.pluckOctave;
@@ -501,7 +510,7 @@ dsp::AstralParameters AstralReverberationsAudioProcessor::readParameters() const
     parameters.pluckTimbre = resolved.pluckTimbre;
     parameters.freeze = getFloatParameter(parameterState, "freeze") >= 0.5f;
     parameters.inputMonitor = getFloatParameter(parameterState, "input_monitor") >= 0.5f;
-    parameters.outputGain = resolved.outputGain;
+    parameters.outputGain = std::clamp(getFloatParameter(parameterState, "output_gain"), 0.0f, 2.0f);
     return parameters;
 }
 
@@ -513,10 +522,16 @@ dsp::PlanetaryDroneParameters AstralReverberationsAudioProcessor::readDroneParam
     parameters.captureLevel = resolved.captureLevel;
     parameters.harmonicSpread = resolved.harmonicSpread;
     parameters.aspectDepth = resolved.aspectDepth;
-    parameters.rootFrequencyHz = midiNoteToFrequency(
-        getDroneRootNote() + static_cast<int>(std::round(resolved.rootOffsetSemitones)));
+    parameters.rootFrequencyHz = getDroneRootFrequencyHz();
     parameters.gate = isDroneGateOpen();
-    parameters.captureEnabled = getFloatParameter(parameterState, "capture_enable") >= 0.5f;
+    bool anyMidiTailHeld = false;
+    for (int tailNote = kMidiTailNoteFirst; tailNote <= kMidiTailNoteLast; ++tailNote) {
+        if (heldDroneGateNotes[static_cast<std::size_t>(tailNote)]) {
+            anyMidiTailHeld = true;
+            break;
+        }
+    }
+    parameters.captureEnabled = getFloatParameter(parameterState, "capture_enable") >= 0.5f || anyMidiTailHeld;
     for (std::size_t index = 0; index < parameters.manualLayerGates.size(); ++index) {
         const bool muted = planetMutes[index].load(std::memory_order_relaxed);
         parameters.manualLayerGates[index] = !muted && manualOrbitTailGates[index].load(std::memory_order_relaxed);
@@ -571,27 +586,141 @@ astro::AstroModulationFrame AstralReverberationsAudioProcessor::nextAstroFrame(i
     return modulationFrame;
 }
 
-void AstralReverberationsAudioProcessor::updateMidiGate(const juce::MidiBuffer& midiMessages)
+float AstralReverberationsAudioProcessor::getDroneRootFrequencyHz() const
 {
-    for (const auto metadata : midiMessages) {
-        const auto message = metadata.getMessage();
-        if (message.isNoteOn()) {
-            heldMidiNotes[static_cast<std::size_t>(message.getNoteNumber())] = true;
-        } else if (message.isNoteOff()) {
-            heldMidiNotes[static_cast<std::size_t>(message.getNoteNumber())] = false;
-        } else if (message.isAllNotesOff() || message.isAllSoundOff()) {
-            heldMidiNotes.fill(false);
+    const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
+    const float rootNote = static_cast<float>(getDroneRootNote()) + resolved.rootOffsetSemitones + midiPitchBendSemitones;
+    return midiNoteToFrequency(rootNote);
+}
+
+void AstralReverberationsAudioProcessor::setParameterFromMidiCc(const char* parameterId, int ccValue)
+{
+    if (auto* parameter = parameterState.getParameter(parameterId)) {
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(midiCcToNormalized(ccValue)));
+    }
+}
+
+void AstralReverberationsAudioProcessor::setBoolParameterFromMidiCc(const char* parameterId, int ccValue)
+{
+    if (auto* parameter = parameterState.getParameter(parameterId)) {
+        parameter->setValueNotifyingHost(ccValue >= 64 ? 1.0f : 0.0f);
+    }
+}
+
+void AstralReverberationsAudioProcessor::refreshMidiVoiceState()
+{
+    droneGateOpen = midiSustainPedalDown;
+    int lowestHeldNote = -1;
+
+    for (int note = 0; note < static_cast<int>(heldDroneGateNotes.size()); ++note) {
+        if (!heldDroneGateNotes[static_cast<std::size_t>(note)]) {
+            continue;
+        }
+
+        droneGateOpen = true;
+        if (lowestHeldNote < 0 || note < lowestHeldNote) {
+            lowestHeldNote = note;
         }
     }
 
-    droneGateOpen = false;
-    for (int note = 0; note < static_cast<int>(heldMidiNotes.size()); ++note) {
-        if (heldMidiNotes[static_cast<std::size_t>(note)]) {
-            currentMidiRootNote = note;
-            droneGateOpen = true;
-            return;
+    if (lowestHeldNote >= 0) {
+        currentMidiRootNote = lowestHeldNote;
+    }
+}
+
+void AstralReverberationsAudioProcessor::processMidiInput(const juce::MidiBuffer& midiMessages)
+{
+    for (const auto metadata : midiMessages) {
+        const auto message = metadata.getMessage();
+        const int note = message.getNoteNumber();
+
+        if (message.isNoteOn()) {
+            if (const auto planet = planetForPluckMidiNote(note)) {
+                if (!isPlanetMuted(*planet)) {
+                    tapOrbitReverbTank(*planet, midiVelocityToWet(message.getVelocity()));
+                }
+                continue;
+            }
+
+            if (const auto planet = planetForTailMidiNote(note)) {
+                if (!isPlanetMuted(*planet)) {
+                    setManualOrbitTailGate(*planet, true);
+                }
+            }
+
+            heldDroneGateNotes[static_cast<std::size_t>(note)] = true;
+        } else if (message.isNoteOff()) {
+            if (const auto planet = planetForTailMidiNote(note)) {
+                setManualOrbitTailGate(*planet, false);
+            }
+            heldDroneGateNotes[static_cast<std::size_t>(note)] = false;
+        } else if (message.isAllNotesOff() || message.isAllSoundOff()) {
+            heldDroneGateNotes.fill(false);
+            for (std::size_t index = 0; index < manualOrbitTailGates.size(); ++index) {
+                manualOrbitTailGates[index].store(false, std::memory_order_relaxed);
+            }
+        } else if (message.isPitchWheel()) {
+            midiPitchBendSemitones = midiPitchWheelToSemitones(message.getPitchWheelValue());
+        } else if (message.isController()) {
+            const int cc = message.getControllerNumber();
+            const int value = message.getControllerValue();
+
+            switch (cc) {
+                case kMidiCcMacroSubstance:
+                    setParameterFromMidiCc("macro_substance", value);
+                    break;
+                case kMidiCcMacroMneme:
+                    setParameterFromMidiCc("macro_mneme", value);
+                    break;
+                case kMidiCcMacroChoir:
+                    setParameterFromMidiCc("macro_choir", value);
+                    break;
+                case kMidiCcMacroEphemeris:
+                    setParameterFromMidiCc("macro_ephemeris", value);
+                    break;
+                case kMidiCcMacroFate:
+                    setParameterFromMidiCc("macro_fate", value);
+                    break;
+                case kMidiCcMacroVoid:
+                    setParameterFromMidiCc("macro_void", value);
+                    break;
+                case kMidiCcMacroPulse:
+                    setParameterFromMidiCc("macro_pulse", value);
+                    break;
+                case kMidiCcMacroRoot:
+                    setParameterFromMidiCc("macro_root", value);
+                    break;
+                case kMidiCcEuclidRate:
+                    setParameterFromMidiCc("euclid_rate", value);
+                    break;
+                case kMidiCcEuclidWet:
+                    setParameterFromMidiCc("euclid_wet", value);
+                    break;
+                case kMidiCcDroneHold:
+                    setBoolParameterFromMidiCc("drone_hold", value);
+                    break;
+                case kMidiCcCaptureEnable:
+                    setBoolParameterFromMidiCc("capture_enable", value);
+                    break;
+                case kMidiCcFreeze:
+                    setBoolParameterFromMidiCc("freeze", value);
+                    break;
+                case kMidiCcEuclidEnable:
+                    setBoolParameterFromMidiCc("euclid_enable", value);
+                    break;
+                case kMidiCcRootLock:
+                    setBoolParameterFromMidiCc("root_lock", value);
+                    break;
+                case kMidiCcSustainPedal:
+                    midiSustainPedalDown = value >= 64;
+                    break;
+                default:
+                    break;
+            }
         }
     }
+
+    refreshMidiVoiceState();
 }
 
 void AstralReverberationsAudioProcessor::applyPlanetLongitudeOffsets(astro::AstroSnapshot& snapshot) const
