@@ -42,6 +42,8 @@ private:
     juce::ComboBox gateModeBox;
     juce::ComboBox planetWaveBox;
     juce::Label planetWaveLabel;
+    juce::ComboBox tailModeBox;
+    juce::Label tailModeLabel;
     juce::Slider planetFilterSlider;
     juce::Label planetFilterLabel;
     juce::TextButton droneHoldButton;
@@ -77,6 +79,7 @@ private:
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::unique_ptr<SliderAttachment> planetFilterAttachment;
     std::unique_ptr<ComboBoxAttachment> planetWaveAttachment;
+    std::unique_ptr<ComboBoxAttachment> tailModeAttachment;
     std::unique_ptr<ButtonAttachment> droneHoldAttachment;
     std::unique_ptr<ButtonAttachment> rootLockAttachment;
     std::unique_ptr<ButtonAttachment> inputMonitorAttachment;

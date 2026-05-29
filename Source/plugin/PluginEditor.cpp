@@ -219,6 +219,38 @@ public:
         return controlFont(13.0f);
     }
 
+    juce::Rectangle<int> getTooltipBounds(const juce::String& tipText, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override
+    {
+        const int width = juce::jlimit(150, 300, 44 + tipText.length() * 5);
+        const int height = tipText.length() > 42 ? 44 : 30;
+        return juce::Rectangle<int>(
+            screenPos.x > parentArea.getCentreX() ? screenPos.x - width - 14 : screenPos.x + 18,
+            screenPos.y > parentArea.getCentreY() ? screenPos.y - height - 12 : screenPos.y + 12,
+            width,
+            height)
+            .constrainedWithin(parentArea.reduced(8));
+    }
+
+    void drawTooltip(juce::Graphics& graphics, const juce::String& text, int width, int height) override
+    {
+        const auto bounds = juce::Rectangle<float>(0.5f, 0.5f, static_cast<float>(width) - 1.0f, static_cast<float>(height) - 1.0f);
+        juce::ColourGradient fill(
+            juce::Colour(18, 24, 31).withAlpha(0.96f),
+            bounds.getX(),
+            bounds.getY(),
+            juce::Colour(8, 12, 17).withAlpha(0.98f),
+            bounds.getRight(),
+            bounds.getBottom(),
+            false);
+        graphics.setGradientFill(fill);
+        graphics.fillRoundedRectangle(bounds, 6.0f);
+        graphics.setColour(cyanColour().withAlpha(0.62f));
+        graphics.drawRoundedRectangle(bounds.reduced(0.5f), 6.0f, 1.0f);
+        graphics.setColour(juce::Colour(232, 236, 239));
+        graphics.setFont(controlFont(10.0f, juce::Font::bold));
+        graphics.drawFittedText(text, juce::Rectangle<int>(8, 4, width - 16, height - 8), juce::Justification::centredLeft, 2);
+    }
+
     void drawButtonBackground(
         juce::Graphics& graphics,
         juce::Button& button,
@@ -228,6 +260,19 @@ public:
     {
         const auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
         const bool on = button.getToggleState();
+        const bool focusSwitch = static_cast<bool>(button.getProperties().getWithDefault("focusSwitch", false));
+        if (focusSwitch) {
+            const auto fill = on ? juce::Colour(23, 34, 47).withAlpha(0.96f)
+                                 : juce::Colour(16, 22, 28).withAlpha(isMouseOverButton ? 0.98f : 0.86f);
+            const auto stroke = on ? goldColour().withAlpha(0.84f)
+                                   : lineColour().withAlpha(isMouseOverButton ? 0.88f : 0.66f);
+            graphics.setColour(isButtonDown ? fill.brighter(0.08f) : fill);
+            graphics.fillRoundedRectangle(bounds, 7.0f);
+            graphics.setColour(stroke);
+            graphics.drawRoundedRectangle(bounds, 7.0f, on ? 1.35f : 1.0f);
+            return;
+        }
+
         const auto fill = on ? goldColour().withAlpha(0.18f)
                              : juce::Colour(24, 31, 36).withAlpha(isMouseOverButton ? 0.96f : 0.82f);
         const auto stroke = on ? goldColour().withAlpha(0.86f)
@@ -241,6 +286,37 @@ public:
 
     void drawButtonText(juce::Graphics& graphics, juce::TextButton& button, bool, bool) override
     {
+        const bool focusSwitch = static_cast<bool>(button.getProperties().getWithDefault("focusSwitch", false));
+        if (focusSwitch) {
+            const auto bounds = button.getLocalBounds().reduced(9, 5);
+            const auto label = button.getProperties().getWithDefault("focusLabel", button.getButtonText()).toString();
+            const auto onText = button.getProperties().getWithDefault("focusOnText", "ON").toString();
+            const auto offText = button.getProperties().getWithDefault("focusOffText", "OFF").toString();
+            const bool on = button.getToggleState();
+            const auto stateText = on ? onText : offText;
+
+            auto textArea = bounds;
+            textArea.removeFromRight(34);
+            graphics.setFont(controlFont(8.5f, juce::Font::bold));
+            graphics.setColour(mutedTextColour().withAlpha(0.96f));
+            graphics.drawText(label, textArea.removeFromTop(13), juce::Justification::centredLeft);
+            graphics.setFont(controlFont(11.0f, juce::Font::bold));
+            graphics.setColour(on ? goldColour() : juce::Colour(232, 236, 239));
+            graphics.drawText(stateText, textArea, juce::Justification::centredLeft);
+
+            auto rail = juce::Rectangle<float>(
+                static_cast<float>(bounds.getRight() - 30),
+                static_cast<float>(bounds.getCentreY() - 7),
+                28.0f,
+                14.0f);
+            graphics.setColour(on ? cyanColour().withAlpha(0.28f) : lineColour().withAlpha(0.42f));
+            graphics.fillRoundedRectangle(rail, 7.0f);
+            graphics.setColour(on ? cyanColour().withAlpha(0.85f) : mutedTextColour().withAlpha(0.52f));
+            const float thumbX = on ? rail.getRight() - 12.0f : rail.getX() + 2.0f;
+            graphics.fillEllipse(thumbX, rail.getY() + 2.0f, 10.0f, 10.0f);
+            return;
+        }
+
         graphics.setFont(getTextButtonFont(button, button.getHeight()));
         graphics.setColour(button.getToggleState() ? goldColour() : juce::Colour(232, 236, 239));
         graphics.drawText(button.getButtonText(), button.getLocalBounds().reduced(8, 0), juce::Justification::centred);
@@ -385,10 +461,52 @@ public:
 juce::Colour accentColour(std::size_t index)
 {
     constexpr std::array<std::uint32_t, 10> colours{{
-        0xfff3d58a, 0xffb9c7d8, 0xff69c6d4, 0xffe5a1bd, 0xffe06f57,
-        0xffd8b65a, 0xff9aa3ad, 0xff7bc4a5, 0xff8ea8ff, 0xffc68ddd
+        0xffffd36f, 0xffbcc8d2, 0xff70d5e4, 0xffee9fc7, 0xffff7668,
+        0xffd6b780, 0xffb8a4ff, 0xff72d4c8, 0xff8ea8ff, 0xffc68ddd
     }};
     return juce::Colour(colours[index % colours.size()]);
+}
+
+float planetVisualRadius(astro::PlanetId planet)
+{
+    switch (planet) {
+        case astro::PlanetId::Sun:
+            return 11.0f;
+        case astro::PlanetId::Moon:
+        case astro::PlanetId::Jupiter:
+        case astro::PlanetId::Saturn:
+            return 9.5f;
+        case astro::PlanetId::Uranus:
+        case astro::PlanetId::Neptune:
+            return 8.8f;
+        case astro::PlanetId::Pluto:
+            return 7.4f;
+        case astro::PlanetId::Mercury:
+        case astro::PlanetId::Venus:
+        case astro::PlanetId::Mars:
+        case astro::PlanetId::Count:
+            break;
+    }
+    return 8.3f;
+}
+
+float parameterValue(juce::AudioProcessorValueTreeState& state, const char* id, float fallback = 0.0f)
+{
+    if (const auto* value = state.getRawParameterValue(id)) {
+        return value->load();
+    }
+    return fallback;
+}
+
+float tailSizeMultiplier(float tailSize)
+{
+    const float size = juce::jlimit(0.0f, 1.0f, tailSize);
+    return 1.0f + size * size * 9.0f;
+}
+
+float visualTailSeconds(float baseSeconds, float tailSize)
+{
+    return juce::jlimit(0.35f, 180.0f, baseSeconds * tailSizeMultiplier(tailSize));
 }
 
 // Converts a MIDI note number into a compact note name for the root selector.
@@ -441,6 +559,12 @@ juce::String sliderTooltip(const juce::String& parameterId)
     }
     if (parameterId == "capture_level") {
         return "Orbit tail capture strength when Capture is armed (scaled by Mneme).";
+    }
+    if (parameterId == "tail_size") {
+        return "Scales planet capture tails from normal holds into very long memory loops.";
+    }
+    if (parameterId == "tail_regen") {
+        return "Adds feedback lift inside planet capture tails for near-infinite regeneration.";
     }
     if (parameterId == "macro_choir") {
         return "Harmonic body: layer spread and aspect bloom (use Drone Level / Pluck Level for balance).";
@@ -506,7 +630,11 @@ juce::String sliderText(const juce::String& parameterId, double value)
     if (parameterId == "euclid_rate") {
         return juce::String(value, 1) + " st/s";
     }
-    if (parameterId == "euclid_wet" || parameterId == "reverb_decay" || parameterId == "reverb_damping" || parameterId == "reverb_mod") {
+    if (parameterId == "tail_size") {
+        const double multiplier = 1.0 + value * value * 9.0;
+        return juce::String(multiplier, 1) + "x";
+    }
+    if (parameterId == "tail_regen" || parameterId == "euclid_wet" || parameterId == "reverb_decay" || parameterId == "reverb_damping" || parameterId == "reverb_mod") {
         return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
     }
     if (parameterId == "capture_level") {
@@ -615,6 +743,7 @@ public:
         const float radius = layout.radius;
         const auto snapshot = processor.getCurrentSnapshotCopy();
         const auto droneFrame = processor.getCurrentDroneFrameCopy();
+        const float tailSize = parameterValue(processor.parameters(), "tail_size");
 
         {
             juce::Graphics::ScopedSaveState textureScope(graphics);
@@ -639,54 +768,51 @@ public:
         drawAspects(graphics, snapshot, centre, radius);
         drawInteractionFeedback(graphics, centre, radius);
 
-        graphics.setColour(juce::Colour(125, 210, 255));
-        graphics.fillEllipse(centre.x - 9.0f, centre.y - 9.0f, 18.0f, 18.0f);
-        graphics.setColour(juce::Colour(235, 239, 242));
-        graphics.setFont(controlFont(10.0f, juce::Font::bold));
-        graphics.drawText("SUN", juce::Rectangle<float>(centre.x - 24.0f, centre.y + 11.0f, 48.0f, 16.0f), juce::Justification::centred);
-
         for (std::size_t index = 0; index < snapshot.planets.size(); ++index) {
             const auto& planet = snapshot.planets[index];
             const float orbitRadius = orbitRadiusForIndex(radius, index);
             const auto& layer = droneFrame.layers[index];
-            const auto position = pointForLongitude(planet.longitudeDegrees, centre, orbitRadius);
+            const auto position = pointForPlanet(planet, index, centre, radius);
             const bool muted = processor.isPlanetMuted(planet.planet);
             graphics.setColour(accentColour(index).withAlpha(0.18f));
             graphics.drawEllipse(centre.x - orbitRadius, centre.y - orbitRadius, orbitRadius * 2.0f, orbitRadius * 2.0f, 1.0f);
             const float tailLevel = muted ? 0.0f : processor.getOrbitTailLevel(planet.planet);
+            const float scaledTailSeconds = visualTailSeconds(layer.tailSeconds, tailSize);
             drawTailArc(graphics,
                 centre,
                 orbitRadius,
                 planet.longitudeDegrees,
-                layer.tailSeconds,
+                scaledTailSeconds,
                 tailLevel,
                 processor.isManualOrbitTailActive(planet.planet),
                 accentColour(index));
-            if (processor.isManualOrbitTailActive(planet.planet) || processor.isOrganLayerActive(planet.planet)) {
-                graphics.setColour(accentColour(index).withAlpha(0.45f));
-                graphics.drawEllipse(position.x - 15.0f, position.y - 15.0f, 30.0f, 30.0f, 2.0f);
+            const bool active = processor.isManualOrbitTailActive(planet.planet) || processor.isOrganLayerActive(planet.planet);
+            drawPlanetNode(graphics,
+                planet.planet,
+                position,
+                accentColour(index),
+                muted,
+                selectedPlanet.has_value() && *selectedPlanet == planet.planet,
+                active,
+                processor.hasPlanetLongitudeOffset(planet.planet),
+                tailLevel);
+
+            const bool isCentreSun = planet.planet == astro::PlanetId::Sun;
+            const bool labelOnLeft = position.x < centre.x;
+            const auto labelBounds = labelOnLeft
+                ? juce::Rectangle<float>(position.x - 82.0f, position.y - 9.0f, 70.0f, 18.0f)
+                : isCentreSun ? juce::Rectangle<float>(position.x - 35.0f, position.y + 15.0f, 70.0f, 18.0f)
+                              : juce::Rectangle<float>(position.x + 11.0f, position.y - 9.0f, 70.0f, 18.0f);
+            if (active || (selectedPlanet.has_value() && *selectedPlanet == planet.planet)) {
+                graphics.setColour(juce::Colour(7, 11, 16).withAlpha(0.62f));
+                graphics.fillRoundedRectangle(labelBounds.expanded(4.0f, 2.0f), 5.0f);
             }
-            if (processor.hasPlanetLongitudeOffset(planet.planet)) {
-                graphics.setColour(goldColour().withAlpha(0.8f));
-                graphics.drawEllipse(position.x - 19.0f, position.y - 19.0f, 38.0f, 38.0f, 1.6f);
-            }
-            if (selectedPlanet.has_value() && *selectedPlanet == planet.planet) {
-                graphics.setColour(goldColour().withAlpha(0.80f));
-                graphics.drawEllipse(position.x - 18.0f, position.y - 18.0f, 36.0f, 36.0f, 2.0f);
-                graphics.setColour(goldColour().withAlpha(0.14f));
-                graphics.fillEllipse(position.x - 22.0f, position.y - 22.0f, 44.0f, 44.0f);
-            }
-            graphics.setColour(muted ? juce::Colour(72, 78, 86) : accentColour(index));
-            graphics.fillEllipse(position.x - 8.0f, position.y - 8.0f, 16.0f, 16.0f);
-            if (muted) {
-                graphics.setColour(juce::Colour(185, 195, 202).withAlpha(0.65f));
-                graphics.drawLine(position.x - 9.0f, position.y + 9.0f, position.x + 9.0f, position.y - 9.0f, 2.0f);
-            }
-            graphics.setColour(juce::Colour(235, 239, 242));
+            graphics.setColour(muted ? juce::Colour(152, 160, 170) : juce::Colour(235, 239, 242));
             graphics.setFont(controlFont(12.0f, juce::Font::bold));
             graphics.drawText(juce::String(astro::toString(planet.planet).data()),
-                juce::Rectangle<float>(position.x + 10.0f, position.y - 9.0f, 70.0f, 18.0f),
-                juce::Justification::centredLeft);
+                labelBounds,
+                isCentreSun ? juce::Justification::centred
+                            : labelOnLeft ? juce::Justification::centredRight : juce::Justification::centredLeft);
         }
 
         drawSpectrum(graphics, layout.harmonicsArea, droneFrame);
@@ -762,6 +888,7 @@ public:
         const float radius = layout.radius;
         const auto snapshot = processor.getCurrentSnapshotCopy();
         const auto droneFrame = processor.getCurrentDroneFrameCopy();
+        const float tailSize = parameterValue(processor.parameters(), "tail_size");
 
         if (const auto sign = signAt(point)) {
             const bool enabled = processor.isSignEffectEnabled(*sign);
@@ -776,9 +903,9 @@ public:
         for (std::size_t index = 0; index < snapshot.planets.size(); ++index) {
             const auto& planet = snapshot.planets[index];
             const float orbitRadius = orbitRadiusForIndex(radius, index);
-            const auto position = pointForLongitude(planet.longitudeDegrees, centre, orbitRadius);
+            const auto position = pointForPlanet(planet, index, centre, radius);
             const auto planetName = juce::String(astro::toString(planet.planet).data());
-            if (position.getDistanceFrom(point) <= 18.0f) {
+            if (position.getDistanceFrom(point) <= planetVisualRadius(planet.planet) + 9.0f) {
                 return planetName
                     + ": drag to offset orbit position; double-click to "
                     + (processor.isPlanetMuted(planet.planet) ? "unmute" : "mute")
@@ -786,11 +913,12 @@ public:
             }
 
             const auto& layer = droneFrame.layers[index];
-            if (isPointNearTailArc(point, centre, orbitRadius, planet.longitudeDegrees, layer.tailSeconds)) {
+            const float scaledTailSeconds = visualTailSeconds(layer.tailSeconds, tailSize);
+            if (isPointNearTailArc(point, centre, orbitRadius, planet.longitudeDegrees, scaledTailSeconds)) {
                 const int tailPercent = static_cast<int>(std::round(juce::jlimit(0.0f, 1.0f, processor.getOrbitTailLevel(planet.planet)) * 100.0f));
                 return planetName
                     + " orbit tail: "
-                    + juce::String(layer.tailSeconds, 1)
+                    + juce::String(scaledTailSeconds, 1)
                     + " s decay, "
                     + juce::String(tailPercent)
                     + "% captured energy. Hold "
@@ -806,8 +934,8 @@ public:
         for (const auto& aspect : snapshot.aspects) {
             const auto aIndex = static_cast<std::size_t>(aspect.a);
             const auto bIndex = static_cast<std::size_t>(aspect.b);
-            const auto a = pointForLongitude(snapshot.planets[aIndex].longitudeDegrees, centre, orbitRadiusForIndex(radius, aIndex));
-            const auto b = pointForLongitude(snapshot.planets[bIndex].longitudeDegrees, centre, orbitRadiusForIndex(radius, bIndex));
+            const auto a = pointForPlanet(snapshot.planets[aIndex], aIndex, centre, radius);
+            const auto b = pointForPlanet(snapshot.planets[bIndex], bIndex, centre, radius);
             if (distanceToLineSegment(point, a, b) <= 6.0f) {
                 return juce::String(astro::toString(aspect.type).data())
                     + " aspect: relative planet position creates harmonic motion and delay tap energy.";
@@ -870,8 +998,10 @@ private:
         auto contentArea = bounds.reduced(12.0f);
         contentArea.removeFromTop(kOrbitTitleBand);
 
-        const auto centre = contentArea.getCentre();
-        const float orbitSpan = std::min(contentArea.getWidth() - kHarmonicsStripWidth, contentArea.getHeight());
+        auto mapArea = contentArea;
+        mapArea.setRight(contentArea.getRight() - kHarmonicsStripWidth);
+        const auto centre = mapArea.getCentre();
+        const float orbitSpan = std::min(mapArea.getWidth(), mapArea.getHeight());
         const float radius = orbitSpan * kOrbitRadiusFactor;
 
         auto harmonicsArea = contentArea;
@@ -888,6 +1018,14 @@ private:
         return {centre.x + std::cos(radians) * radius, centre.y + std::sin(radians) * radius};
     }
 
+    static juce::Point<float> pointForPlanet(const astro::PlanetPosition& planet, std::size_t index, juce::Point<float> centre, float radius)
+    {
+        if (planet.planet == astro::PlanetId::Sun) {
+            return centre;
+        }
+        return pointForLongitude(planet.longitudeDegrees, centre, orbitRadiusForIndex(radius, index));
+    }
+
     /// Hit-tests the draggable planet nodes.
     std::optional<astro::PlanetId> planetAt(juce::Point<float> point) const
     {
@@ -897,8 +1035,8 @@ private:
         const auto snapshot = processor.getCurrentSnapshotCopy();
 
         for (std::size_t index = 0; index < snapshot.planets.size(); ++index) {
-            const auto position = pointForLongitude(snapshot.planets[index].longitudeDegrees, centre, orbitRadiusForIndex(radius, index));
-            if (position.getDistanceFrom(point) <= 16.0f) {
+            const auto position = pointForPlanet(snapshot.planets[index], index, centre, radius);
+            if (position.getDistanceFrom(point) <= planetVisualRadius(snapshot.planets[index].planet) + 8.0f) {
                 return snapshot.planets[index].planet;
             }
         }
@@ -999,7 +1137,7 @@ private:
         float tailSeconds)
     {
         constexpr float kMinimumTailSeconds = 1.5f;
-        constexpr float kMaximumTailSeconds = 18.0f;
+        constexpr float kMaximumTailSeconds = 120.0f;
         const float normalizedTail = juce::jlimit(0.0f, 1.0f, (tailSeconds - kMinimumTailSeconds) / (kMaximumTailSeconds - kMinimumTailSeconds));
         const float arcDegrees = 26.0f + normalizedTail * 236.0f;
         const float distanceFromCentre = point.getDistanceFrom(centre);
@@ -1338,8 +1476,8 @@ private:
         for (const auto& aspect : snapshot.aspects) {
             const auto aIndex = static_cast<std::size_t>(aspect.a);
             const auto bIndex = static_cast<std::size_t>(aspect.b);
-            const auto a = pointForLongitude(snapshot.planets[aIndex].longitudeDegrees, centre, orbitRadiusForIndex(radius, aIndex));
-            const auto b = pointForLongitude(snapshot.planets[bIndex].longitudeDegrees, centre, orbitRadiusForIndex(radius, bIndex));
+            const auto a = pointForPlanet(snapshot.planets[aIndex], aIndex, centre, radius);
+            const auto b = pointForPlanet(snapshot.planets[bIndex], bIndex, centre, radius);
             const auto colour = aspect.type == astro::AspectType::Square || aspect.type == astro::AspectType::Opposition
                 ? juce::Colour(224, 111, 87)
                 : juce::Colour(105, 198, 212);
@@ -1360,7 +1498,7 @@ private:
         juce::Colour colour)
     {
         constexpr float kMinimumTailSeconds = 1.5f;
-        constexpr float kMaximumTailSeconds = 18.0f;
+        constexpr float kMaximumTailSeconds = 120.0f;
         const float normalizedTail = juce::jlimit(0.0f, 1.0f, (tailSeconds - kMinimumTailSeconds) / (kMaximumTailSeconds - kMinimumTailSeconds));
         const float arcDegrees = 26.0f + normalizedTail * 236.0f;
         const int segments = 24 + static_cast<int>(normalizedTail * 28.0f);
@@ -1412,6 +1550,152 @@ private:
             const float glowSize = 11.0f + level * 13.0f;
             graphics.setColour(goldColour().withAlpha(active ? 0.9f : level * 0.55f));
             graphics.drawEllipse(marker.x - glowSize * 0.5f, marker.y - glowSize * 0.5f, glowSize, glowSize, 1.4f);
+        }
+    }
+
+    void drawPlanetNode(juce::Graphics& graphics,
+        astro::PlanetId planet,
+        juce::Point<float> position,
+        juce::Colour colour,
+        bool muted,
+        bool selected,
+        bool active,
+        bool hasOffset,
+        float tailLevel) const
+    {
+        const float radius = planetVisualRadius(planet);
+        const auto bodyBounds = juce::Rectangle<float>(position.x - radius, position.y - radius, radius * 2.0f, radius * 2.0f);
+        const auto bodyColour = muted ? juce::Colour(87, 96, 106) : colour;
+        const float energy = juce::jlimit(0.0f, 1.0f, tailLevel);
+
+        if (planet == astro::PlanetId::Sun && !muted) {
+            const float glowRadius = radius + 32.0f + energy * 12.0f;
+            juce::ColourGradient sunGlow(
+                juce::Colour(255, 208, 84).withAlpha(0.28f),
+                position.x,
+                position.y,
+                juce::Colours::transparentBlack,
+                position.x + glowRadius,
+                position.y + glowRadius,
+                true);
+            sunGlow.addColour(0.42, juce::Colour(255, 160, 55).withAlpha(0.10f));
+            graphics.setGradientFill(sunGlow);
+            graphics.fillEllipse(position.x - glowRadius, position.y - glowRadius, glowRadius * 2.0f, glowRadius * 2.0f);
+
+            graphics.setColour(juce::Colour(255, 214, 98).withAlpha(0.34f));
+            for (int ray = 0; ray < 12; ++ray) {
+                const float angle = static_cast<float>(ray) * kPi / 6.0f;
+                const auto inner = juce::Point<float>(position.x + std::cos(angle) * (radius + 6.0f), position.y + std::sin(angle) * (radius + 6.0f));
+                const auto outer = juce::Point<float>(position.x + std::cos(angle) * (radius + 16.0f), position.y + std::sin(angle) * (radius + 16.0f));
+                graphics.drawLine(inner.x, inner.y, outer.x, outer.y, 0.9f);
+            }
+        }
+
+        if (selected || active || energy > 0.04f) {
+            const float glowRadius = radius + (selected ? 18.0f : 10.0f) + energy * 8.0f;
+            juce::ColourGradient glow(
+                (selected ? goldColour() : bodyColour).withAlpha(selected ? 0.26f : 0.14f + energy * 0.16f),
+                position.x,
+                position.y,
+                juce::Colours::transparentBlack,
+                position.x + glowRadius,
+                position.y + glowRadius,
+                true);
+            graphics.setGradientFill(glow);
+            graphics.fillEllipse(position.x - glowRadius, position.y - glowRadius, glowRadius * 2.0f, glowRadius * 2.0f);
+        }
+
+        if (active) {
+            graphics.setColour(cyanColour().withAlpha(0.72f));
+            graphics.drawEllipse(bodyBounds.expanded(6.0f), 1.8f);
+        }
+
+        if (hasOffset) {
+            graphics.setColour(goldColour().withAlpha(0.72f));
+            graphics.drawEllipse(bodyBounds.expanded(9.0f), 1.2f);
+            graphics.drawLine(position.x - radius - 14.0f, position.y, position.x - radius - 8.0f, position.y, 1.1f);
+            graphics.drawLine(position.x + radius + 8.0f, position.y, position.x + radius + 14.0f, position.y, 1.1f);
+        }
+
+        if (selected) {
+            graphics.setColour(goldColour().withAlpha(0.9f));
+            graphics.drawEllipse(bodyBounds.expanded(10.0f), 2.0f);
+            graphics.setColour(cyanColour().withAlpha(0.48f));
+            graphics.drawEllipse(bodyBounds.expanded(14.0f), 1.0f);
+        }
+
+        if (planet == astro::PlanetId::Saturn) {
+            juce::Path ring;
+            ring.addEllipse(position.x - radius * 1.95f, position.y - radius * 0.58f, radius * 3.9f, radius * 1.16f);
+            ring.applyTransform(juce::AffineTransform::rotation(-0.34f, position.x, position.y));
+            graphics.setColour(bodyColour.withAlpha(muted ? 0.24f : 0.58f));
+            graphics.strokePath(ring, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
+        graphics.setColour(juce::Colour(0, 0, 0).withAlpha(0.32f));
+        graphics.fillEllipse(bodyBounds.translated(1.6f, 2.0f).expanded(1.0f));
+
+        juce::ColourGradient bodyGradient(
+            bodyColour.brighter(muted ? 0.08f : 0.42f),
+            position.x - radius * 0.55f,
+            position.y - radius * 0.68f,
+            bodyColour.darker(muted ? 0.60f : 0.92f),
+            position.x + radius * 0.62f,
+            position.y + radius * 0.72f,
+            true);
+        bodyGradient.addColour(0.56, bodyColour.withAlpha(0.96f));
+        graphics.setGradientFill(bodyGradient);
+        graphics.fillEllipse(bodyBounds);
+
+        if (!muted) {
+            if (planet == astro::PlanetId::Moon) {
+                graphics.setColour(panelColour().withAlpha(0.52f));
+                graphics.fillEllipse(bodyBounds.translated(radius * 0.34f, -radius * 0.05f));
+                graphics.setColour(juce::Colour(235, 239, 242).withAlpha(0.28f));
+                graphics.drawEllipse(bodyBounds.reduced(radius * 0.18f), 1.0f);
+            } else if (planet == astro::PlanetId::Sun) {
+                graphics.setColour(juce::Colour(255, 245, 190).withAlpha(0.22f));
+                graphics.drawLine(position.x - radius * 0.64f, position.y - radius * 0.10f, position.x + radius * 0.54f, position.y + radius * 0.06f, 1.2f);
+                graphics.drawLine(position.x - radius * 0.38f, position.y + radius * 0.34f, position.x + radius * 0.50f, position.y + radius * 0.24f, 1.0f);
+            } else if (planet == astro::PlanetId::Jupiter) {
+                for (float band = -0.42f; band <= 0.44f; band += 0.28f) {
+                    const float y = position.y + band * radius;
+                    const float halfWidth = std::sqrt(std::max(0.0f, radius * radius - (y - position.y) * (y - position.y))) * 0.82f;
+                    graphics.setColour(juce::Colour(235, 239, 242).withAlpha(0.18f));
+                    graphics.drawLine(position.x - halfWidth, y, position.x + halfWidth, y, 1.2f);
+                }
+            } else if (planet == astro::PlanetId::Mars) {
+                graphics.setColour(juce::Colour(255, 220, 210).withAlpha(0.22f));
+                graphics.drawLine(position.x - radius * 0.48f, position.y + radius * 0.26f, position.x + radius * 0.42f, position.y - radius * 0.34f, 1.4f);
+            } else if (planet == astro::PlanetId::Uranus || planet == astro::PlanetId::Neptune) {
+                graphics.setColour(cyanColour().withAlpha(0.30f));
+                graphics.drawEllipse(bodyBounds.reduced(radius * 0.20f), 1.1f);
+                graphics.drawLine(position.x, position.y - radius * 0.64f, position.x, position.y + radius * 0.64f, 1.0f);
+            } else if (planet == astro::PlanetId::Pluto) {
+                graphics.setColour(juce::Colour(235, 239, 242).withAlpha(0.36f));
+                graphics.fillEllipse(position.x + radius * 0.24f, position.y - radius * 0.48f, radius * 0.30f, radius * 0.30f);
+            }
+        }
+
+        if (planet == astro::PlanetId::Saturn) {
+            juce::Path ring;
+            ring.addEllipse(position.x - radius * 1.95f, position.y - radius * 0.58f, radius * 3.9f, radius * 1.16f);
+            ring.applyTransform(juce::AffineTransform::rotation(-0.34f, position.x, position.y));
+            graphics.setColour(bodyColour.brighter(0.12f).withAlpha(muted ? 0.34f : 0.82f));
+            graphics.strokePath(ring, juce::PathStrokeType(1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
+        graphics.setColour(juce::Colour(245, 250, 255).withAlpha(muted ? 0.12f : 0.34f));
+        graphics.fillEllipse(position.x - radius * 0.42f, position.y - radius * 0.54f, radius * 0.46f, radius * 0.34f);
+
+        graphics.setColour(juce::Colour(245, 250, 255).withAlpha(muted ? 0.18f : 0.56f));
+        graphics.drawEllipse(bodyBounds, 1.2f);
+
+        if (muted) {
+            graphics.setColour(juce::Colour(11, 14, 18).withAlpha(0.48f));
+            graphics.fillEllipse(bodyBounds);
+            graphics.setColour(juce::Colour(220, 228, 238).withAlpha(0.68f));
+            graphics.drawLine(position.x - radius * 0.82f, position.y + radius * 0.82f, position.x + radius * 0.82f, position.y - radius * 0.82f, 2.0f);
         }
     }
 
@@ -1563,6 +1847,8 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     addSlider("pluck_send", "Pluck Send", SliderLayout::Inspector);
     addSlider("drone_level", "Drone", SliderLayout::Inspector);
     addSlider("capture_level", "Capture", SliderLayout::Inspector);
+    addSlider("tail_size", "Tail Size", SliderLayout::Inspector);
+    addSlider("tail_regen", "Regen", SliderLayout::Inspector);
     addSlider("macro_substance", "Substance", SliderLayout::Bottom);
     addSlider("macro_choir", "Choir", SliderLayout::Bottom);
     addSlider("macro_mneme", "Mneme", SliderLayout::Bottom);
@@ -1615,6 +1901,20 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetWaveBox.addItem("Fold", 5);
     planetWaveBox.setTooltip("Base oscillator waveform for the selected planet.");
     addAndMakeVisible(planetWaveBox);
+
+    tailModeLabel.setText("Tail Mode", juce::dontSendNotification);
+    tailModeLabel.setJustificationType(juce::Justification::centredLeft);
+    tailModeLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
+    tailModeLabel.setFont(controlFont(11.0f, juce::Font::bold));
+    tailModeLabel.setTooltip("Character mode for captured planet tails.");
+    addAndMakeVisible(tailModeLabel);
+
+    tailModeBox.addItem("LIM", 1);
+    tailModeBox.addItem("DIST", 2);
+    tailModeBox.addItem("SHIM", 3);
+    tailModeBox.setTooltip("LIM keeps tails bounded, DIST saturates the feedback loop, SHIM adds octave-like shimmer energy.");
+    addAndMakeVisible(tailModeBox);
+    tailModeAttachment = std::make_unique<ComboBoxAttachment>(audioProcessor.parameters(), "tail_mode", tailModeBox);
 
     planetFilterLabel.setText("Filter", juce::dontSendNotification);
     planetFilterLabel.setJustificationType(juce::Justification::centredLeft);
@@ -1816,6 +2116,8 @@ void AstralReverberationsEditor::resized()
     gateModeBox.setVisible(false);
     planetWaveBox.setVisible(showControls);
     planetWaveLabel.setVisible(showControls);
+    tailModeBox.setVisible(showControls);
+    tailModeLabel.setVisible(showControls);
     planetFilterSlider.setVisible(showControls);
     planetFilterLabel.setVisible(showControls);
     droneHoldButton.setVisible(showControls || showFocusPerformance);
@@ -1851,6 +2153,20 @@ void AstralReverberationsEditor::resized()
     focusButton.setButtonText(mapFocusMode ? "Exit Focus" : "Focus Map");
     focusButton.setToggleState(mapFocusMode, juce::dontSendNotification);
 
+    const auto configureFocusSwitch = [this](juce::TextButton& button, const char* label, const char* offText, const char* onText) {
+        button.getProperties().set("focusSwitch", mapFocusMode);
+        button.getProperties().set("focusLabel", label);
+        button.getProperties().set("focusOffText", offText);
+        button.getProperties().set("focusOnText", onText);
+    };
+    configureFocusSwitch(droneHoldButton, "DRONE", "OFF", "ON");
+    configureFocusSwitch(captureButton, "CAPTURE", "ARM", "ARMED");
+    configureFocusSwitch(freezeButton, "FREEZE", "FREE", "HELD");
+    configureFocusSwitch(inputMonitorButton, "MONITOR", "OFF", "ON");
+    configureFocusSwitch(euclidButton, "EUCLID", "OFF", "ON");
+    configureFocusSwitch(organButton, "ORGAN", "OFF", "ON");
+    configureFocusSwitch(rootLockButton, "ROOT MODE", "FOLLOW", "MANUAL");
+
     if (mapFocusMode) {
         auto bounds = getLocalBounds().reduced(kPadding);
         auto top = bounds.removeFromTop(kTopBarHeight);
@@ -1860,25 +2176,25 @@ void AstralReverberationsEditor::resized()
         bounds.removeFromTop(kPanelGap);
         orbitMap->setBounds(bounds);
 
-        auto overlay = bounds.reduced(14).removeFromBottom(58);
-        overlay.setWidth(std::min(overlay.getWidth(), 820));
-        auto row = overlay.reduced(12, 12);
-        const int cellWidth = 76;
-        droneHoldButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        auto overlay = bounds.reduced(14).removeFromBottom(82);
+        overlay.setWidth(std::min(overlay.getWidth(), 1080));
+        auto row = overlay.reduced(12, 10).removeFromBottom(46);
+        const int cellWidth = 116;
+        droneHoldButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(8);
-        captureButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        captureButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(8);
-        freezeButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        freezeButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(8);
-        inputMonitorButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        inputMonitorButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(8);
-        euclidButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        euclidButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(8);
-        organButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        organButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(44));
         row.removeFromLeft(14);
-        rootNoteBox.setBounds(row.removeFromLeft(78).removeFromBottom(28));
+        rootNoteBox.setBounds(row.removeFromLeft(84).removeFromBottom(44).reduced(0, 5));
         row.removeFromLeft(8);
-        rootLockButton.setBounds(row.removeFromLeft(92).removeFromBottom(28));
+        rootLockButton.setBounds(row.removeFromLeft(132).removeFromBottom(44));
         return;
     }
 
@@ -1916,8 +2232,9 @@ void AstralReverberationsEditor::resized()
 
     left.removeFromTop(10);
     left.removeFromTop(24);
-    auto pluck = left.removeFromTop(118);
+    auto pluck = left.removeFromTop(128);
     euclidButton.setBounds(pluck.removeFromTop(30).removeFromRight(72).reduced(0, 4));
+    pluck.removeFromTop(30);
     for (int index = 0; index < 2; ++index) {
         auto row = pluck.removeFromTop(32).reduced(0, 2);
         labels[index]->setBounds(row.removeFromLeft(64));
@@ -1946,7 +2263,17 @@ void AstralReverberationsEditor::resized()
         sliders[index]->setBounds(row);
     }
 
-    inspector.removeFromTop(8);
+    inspector.removeFromTop(6);
+    auto tailModeRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
+    tailModeLabel.setBounds(tailModeRow.removeFromLeft(kInspectorLabelWidth));
+    tailModeBox.setBounds(tailModeRow);
+    for (int index = 8; index < 10; ++index) {
+        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 3);
+        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
+        sliders[index]->setBounds(row);
+    }
+
+    inspector.removeFromTop(4);
     auto speedRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
     const int speedWidth = speedRow.getWidth() / 3;
     slowButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
@@ -1958,7 +2285,7 @@ void AstralReverberationsEditor::resized()
 
     limiterButton.setBounds(layout.meterColumn.reduced(10).removeFromBottom(32));
 
-    const int bottomSliderStart = 8;
+    const int bottomSliderStart = 10;
     const int bottomSliderCount = sliders.size() - bottomSliderStart;
     const int cellWidth = layout.macroStrip.getWidth() / std::max(1, bottomSliderCount);
     for (int index = bottomSliderStart; index < sliders.size(); ++index) {
@@ -2066,6 +2393,9 @@ static float defaultSliderValue(const juce::String& parameterId)
     }
     if (parameterId == "pluck_send") {
         return 1.0f;
+    }
+    if (parameterId == "tail_size" || parameterId == "tail_regen") {
+        return 0.0f;
     }
     if (parameterId == "master_eq_low" || parameterId == "master_eq_mid" || parameterId == "master_eq_high") {
         return 0.0f;
@@ -2231,19 +2561,16 @@ void AstralReverberationsEditor::drawInterfaceChrome(juce::Graphics& graphics)
         auto bounds = getLocalBounds().reduced(kPadding);
         drawPanel(graphics, bounds.removeFromTop(kTopBarHeight).toFloat(), 0.80f);
         bounds.removeFromTop(kPanelGap);
-        auto overlay = bounds.reduced(14).removeFromBottom(58).toFloat();
-        overlay.setWidth(std::min(overlay.getWidth(), 820.0f));
+        auto overlay = bounds.reduced(14).removeFromBottom(82).toFloat();
+        overlay.setWidth(std::min(overlay.getWidth(), 1080.0f));
         drawPanel(graphics, overlay, 0.78f);
 
-        auto row = overlay.reduced(12.0f, 8.0f);
-        const float cellWidth = 76.0f;
-        constexpr std::array<const char*, 8> focusLabels{{"Drone", "Capture", "Freeze", "Monitor", "Euclid", "Organ", "Root", "Mode"}};
-        graphics.setFont(controlFont(8.5f, juce::Font::bold));
-        graphics.setColour(mutedTextColour());
-        for (const auto* label : focusLabels) {
-            graphics.drawText(label, row.removeFromLeft(cellWidth), juce::Justification::centred);
-            row.removeFromLeft(label == focusLabels[5] ? 14.0f : 8.0f);
-        }
+        auto header = overlay.reduced(12.0f, 8.0f).removeFromTop(16.0f);
+        graphics.setFont(controlFont(9.0f, juce::Font::bold));
+        graphics.setColour(goldColour().withAlpha(0.92f));
+        graphics.drawText("PERFORMANCE", header.removeFromLeft(720.0f), juce::Justification::centredLeft);
+        graphics.setColour(cyanColour().withAlpha(0.88f));
+        graphics.drawText("ROOT SOURCE", header, juce::Justification::centredLeft);
         return;
     }
 
@@ -2290,14 +2617,34 @@ void AstralReverberationsEditor::drawInterfaceChrome(juce::Graphics& graphics)
     drawSectionTitle(graphics, left.removeFromTop(20.0f), "Pluck Engine");
     auto euclidRow = left.removeFromTop(30.0f);
     drawPerformanceRow(euclidRow, "EUCLIDEAN", "Generative plucks");
-    auto pattern = left.removeFromTop(24.0f).withTrimmedLeft(66.0f);
+    left.removeFromTop(8.0f);
+    auto patternRow = left.removeFromTop(22.0f);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("STEPS", patternRow.removeFromLeft(44.0f), juce::Justification::centredLeft);
+    patternRow.removeFromLeft(6.0f);
+    const float cellWidth = patternRow.getWidth() / 16.0f;
+    const auto euclidState = audioProcessor.getEuclideanPatternState();
     for (int step = 0; step < 16; ++step) {
-        auto cell = pattern.removeFromLeft(9.5f).reduced(1.2f, 3.0f);
-        const bool hit = step == 0 || step == 3 || step == 7 || step == 11 || step == 14;
-        graphics.setColour(hit ? cyanColour().withAlpha(0.86f) : lineColour().withAlpha(0.52f));
+        auto cell = patternRow.removeFromLeft(cellWidth).reduced(1.3f, 2.0f);
+        const auto cellIndex = static_cast<std::size_t>(step);
+        const bool hit = euclidState.hits[cellIndex];
+        const bool active = euclidState.activeStep == step;
+        const float flash = juce::jlimit(0.0f, 1.0f, euclidState.levels[cellIndex]);
+        const float enabledAlpha = euclidState.enabled ? 1.0f : 0.38f;
+        const auto baseColour = hit ? cyanColour() : lineColour();
+        graphics.setColour(baseColour.withAlpha((hit ? 0.58f : 0.30f) * enabledAlpha + flash * 0.28f));
         graphics.fillRoundedRectangle(cell, 1.4f);
+        if (active) {
+            graphics.setColour(goldColour().withAlpha(euclidState.enabled ? 0.92f : 0.38f));
+            graphics.drawRoundedRectangle(cell.expanded(1.4f), 2.0f, 1.1f);
+        }
+        if (flash > 0.03f) {
+            graphics.setColour(goldColour().withAlpha(flash * 0.82f));
+            graphics.fillRoundedRectangle(cell.reduced(2.0f, 1.5f), 1.0f);
+        }
     }
-    left.removeFromTop(56.0f);
+    left.removeFromTop(64.0f);
 
     left.removeFromTop(10.0f);
     drawSectionTitle(graphics, left.removeFromTop(20.0f), "Root & Gate");

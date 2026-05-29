@@ -16,6 +16,9 @@ struct PlanetaryDroneParameters {
     float harmonicSpread = 0.65f;
     float aspectDepth = 0.5f;
     float rootFrequencyHz = 110.0f;
+    float tailSize = 0.0f;
+    float tailRegen = 0.0f;
+    int tailMode = 0;
     bool gate = false;
     bool organMode = false;
     bool captureEnabled = false;
@@ -72,13 +75,16 @@ private:
         std::vector<float> right;
         int writeIndex = 0;
         float envelope = 0.0f;
+        float smoothedDelaySamples = 0.0f;
+        float shimmerDcLeft = 0.0f;
+        float shimmerDcRight = 0.0f;
 
         /// Allocates the per-planet feedback tail buffer.
         void prepare(int sampleCount);
         /// Clears buffered tail audio and envelope state.
         void reset();
         /// Processes one sample of a keyed orbit tail and returns left output, writing right output by reference.
-        float process(float inputLeft, float inputRight, float tailSeconds, float level, float pan, bool active, float& rightOut, double sampleRate);
+        float process(float inputLeft, float inputRight, float tailSeconds, float level, float pan, bool active, float tailRegen, int tailMode, float& rightOut, double sampleRate);
         /// Returns true while the tail is being excited or still audibly decaying.
         bool isReplacingLayer() const noexcept { return envelope > 0.0008f; }
     };

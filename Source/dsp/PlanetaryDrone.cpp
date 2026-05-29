@@ -20,6 +20,11 @@ float sanitize(float value)
     return std::isfinite(value) ? value : 0.0f;
 }
 
+float softLimit(float value)
+{
+    return std::tanh(sanitize(value));
+}
+
 // Converts detune cents into a frequency multiplier.
 float centsToRatio(float cents)
 {
@@ -70,17 +75,26 @@ float onePoleCoefficient(float cutoffHz, double sampleRate)
 // Chooses a short feedback-loop delay that supports the requested long decay time.
 int manualTailDelaySamples(float tailSeconds, double sampleRate, int bufferSize)
 {
-    const float clampedTail = std::clamp(tailSeconds, 1.0f, 20.0f);
-    const float delaySeconds = std::clamp(0.10f + clampedTail * 0.035f, 0.12f, 0.82f);
+    const float clampedTail = std::clamp(tailSeconds, 1.0f, 180.0f);
+    const float delaySeconds = std::clamp(0.10f + std::sqrt(clampedTail) * 0.12f, 0.12f, 0.82f);
     return std::clamp(static_cast<int>(delaySeconds * static_cast<float>(sampleRate)), 1, std::max(1, bufferSize - 2));
 }
 
 // Computes feedback gain so a tail falls by roughly 60 dB over tailSeconds.
-float feedbackForTail(float tailSeconds, int delaySamples, double sampleRate)
+float feedbackForTail(float tailSeconds, int delaySamples, double sampleRate, float tailRegen)
 {
-    const float clampedTail = std::clamp(tailSeconds, 0.1f, 20.0f);
+    const float clampedTail = std::clamp(tailSeconds, 0.1f, 180.0f);
     const float delaySeconds = static_cast<float>(delaySamples) / static_cast<float>(std::max(1.0, sampleRate));
-    return std::clamp(std::pow(0.001f, delaySeconds / clampedTail), 0.0f, 0.995f);
+    const float baseFeedback = std::pow(0.001f, delaySeconds / clampedTail);
+    const float regenLift = std::pow(std::clamp(tailRegen, 0.0f, 1.0f), 1.7f) * 0.18f;
+    return std::clamp(baseFeedback + regenLift, 0.0f, 0.9996f);
+}
+
+float shapedTailSeconds(float baseSeconds, float tailSize)
+{
+    const float size = std::clamp(tailSize, 0.0f, 1.0f);
+    const float multiplier = 1.0f + size * size * 9.0f;
+    return std::clamp(baseSeconds * multiplier, 0.35f, 180.0f);
 }
 
 } // namespace
@@ -142,6 +156,9 @@ void PlanetaryDrone::ManualTailBuffer::reset()
     std::fill(right.begin(), right.end(), 0.0f);
     writeIndex = 0;
     envelope = 0.0f;
+    smoothedDelaySamples = 0.0f;
+    shimmerDcLeft = 0.0f;
+    shimmerDcRight = 0.0f;
 }
 
 float PlanetaryDrone::ManualTailBuffer::process(
@@ -151,6 +168,8 @@ float PlanetaryDrone::ManualTailBuffer::process(
     float level,
     float pan,
     bool active,
+    float tailRegen,
+    int tailMode,
     float& rightOut,
     double sampleRate)
 {
@@ -160,27 +179,63 @@ float PlanetaryDrone::ManualTailBuffer::process(
     }
 
     const int size = static_cast<int>(left.size());
-    const int delaySamples = manualTailDelaySamples(tailSeconds, sampleRate, size);
-    const int readIndex = (writeIndex + size - delaySamples) % size;
-    const float feedback = feedbackForTail(tailSeconds, delaySamples, sampleRate);
-    const float leftDelayed = sanitize(left[readIndex]);
-    const float rightDelayed = sanitize(right[readIndex]);
+    const float targetDelaySamples = static_cast<float>(manualTailDelaySamples(tailSeconds, sampleRate, size));
+    if (smoothedDelaySamples <= 1.0f) {
+        smoothedDelaySamples = targetDelaySamples;
+    } else {
+        smoothedDelaySamples += (targetDelaySamples - smoothedDelaySamples) * 0.0008f;
+    }
+    const float readPosition = static_cast<float>(writeIndex) + static_cast<float>(size) - smoothedDelaySamples;
+    const float regen = std::clamp(tailRegen, 0.0f, 1.0f);
+    const int mode = std::clamp(tailMode, 0, 2);
+    const float feedback = feedbackForTail(tailSeconds, static_cast<int>(std::round(smoothedDelaySamples)), sampleRate, regen);
+    const float leftDelayed = sanitize(PlanetaryDrone::readInterpolated(left, readPosition));
+    const float rightDelayed = sanitize(PlanetaryDrone::readInterpolated(right, readPosition));
     const float panClamped = std::clamp(pan, -1.0f, 1.0f);
     const float leftGain = std::sqrt(0.5f * (1.0f - panClamped));
     const float rightGain = std::sqrt(0.5f * (1.0f + panClamped));
     const float targetEnvelope = active ? 1.0f : 0.0f;
-    const float envelopeStep = active ? 0.008f : 1.0f / (std::clamp(tailSeconds, 1.0f, 20.0f) * static_cast<float>(sampleRate));
+    const float envelopeStep = active ? 0.008f : 1.0f / (std::clamp(tailSeconds, 1.0f, 180.0f) * static_cast<float>(sampleRate));
 
     envelope += (targetEnvelope - envelope) * envelopeStep;
 
     const float excitationLeft = active ? inputLeft * level * leftGain : 0.0f;
     const float excitationRight = active ? inputRight * level * rightGain : 0.0f;
-    left[writeIndex] = sanitize(excitationLeft + leftDelayed * feedback);
-    right[writeIndex] = sanitize(excitationRight + rightDelayed * feedback);
+    float feedbackLeft = leftDelayed;
+    float feedbackRight = rightDelayed;
+    if (mode == 1) {
+        const float drive = 1.0f + regen * 5.5f;
+        feedbackLeft = softLimit(leftDelayed * drive);
+        feedbackRight = softLimit(rightDelayed * drive);
+    } else if (mode == 2) {
+        const float rawShimmerLeft = std::abs(rightDelayed + leftDelayed * 0.35f);
+        const float rawShimmerRight = std::abs(leftDelayed + rightDelayed * 0.35f);
+        shimmerDcLeft += (rawShimmerLeft - shimmerDcLeft) * 0.0012f;
+        shimmerDcRight += (rawShimmerRight - shimmerDcRight) * 0.0012f;
+        const float shimmerAmount = 0.12f + regen * 0.34f;
+        feedbackLeft += softLimit(rawShimmerLeft - shimmerDcLeft) * shimmerAmount;
+        feedbackRight += softLimit(rawShimmerRight - shimmerDcRight) * shimmerAmount;
+    }
+
+    float writeLeft = excitationLeft + feedbackLeft * feedback;
+    float writeRight = excitationRight + feedbackRight * feedback;
+    if (mode == 0) {
+        const float limiterDrive = 1.0f + regen * 0.9f;
+        writeLeft = softLimit(writeLeft * limiterDrive);
+        writeRight = softLimit(writeRight * limiterDrive);
+    } else if (mode == 1) {
+        const float outputTrim = 0.78f - regen * 0.08f;
+        writeLeft = softLimit(writeLeft * (1.0f + regen * 2.2f)) * outputTrim;
+        writeRight = softLimit(writeRight * (1.0f + regen * 2.2f)) * outputTrim;
+    }
+
+    left[writeIndex] = sanitize(writeLeft);
+    right[writeIndex] = sanitize(writeRight);
     writeIndex = (writeIndex + 1) % size;
 
-    rightOut = rightDelayed * level * envelope;
-    return leftDelayed * level * envelope;
+    const float outputDrive = mode == 1 ? 1.0f + regen * 1.6f : 1.0f;
+    rightOut = softLimit(rightDelayed * outputDrive) * level * envelope;
+    return softLimit(leftDelayed * outputDrive) * level * envelope;
 }
 
 void PlanetaryDrone::prepare(double newSampleRate, int)
@@ -314,13 +369,16 @@ void PlanetaryDrone::processBlock(
             bool tailReplacingLayer = manualCaptureHeld;
             if (captureLevel > 0.0f) {
                 float tailRight = 0.0f;
+                const float tailSeconds = shapedTailSeconds(layer.tailSeconds, parameters.tailSize);
                 const float tailLeft = manualTails[index].process(
                     tailSourceLeft,
                     tailSourceRight,
-                    layer.tailSeconds,
+                    tailSeconds,
                     captureLevel * layer.amplitude,
                     pan,
                     manualCaptureHeld,
+                    parameters.tailRegen,
+                    parameters.tailMode,
                     tailRight,
                     sampleRate);
                 manualLeft += tailLeft;
@@ -353,9 +411,9 @@ void PlanetaryDrone::processBlock(
                 blockUseExternalCapture ? captureInRight : droneRight);
         }
 
-        const float layerScale = 1.0f / static_cast<float>(frame.layers.size());
+        const float layerScale = 1.35f / static_cast<float>(frame.layers.size());
         const float manualScale = anyManualCaptureHeld ? layerScale : (0.55f / static_cast<float>(frame.layers.size()));
-        const float synthGain = droneLevel * gateEnvelope;
+        const float synthGain = droneLevel * gateEnvelope * 1.18f;
         const float manualGain = 1.0f;
         output.left[sample] = sanitize(output.left[sample]
             + std::tanh(droneLeft * layerScale * aspectGain) * synthGain

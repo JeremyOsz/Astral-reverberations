@@ -8,6 +8,7 @@ Learning notes and reference material for Astral Reverberations. Start at the [r
 |----------|----------|
 | [`astro-mapping.md`](astro-mapping.md) | Offline sky simulation, aspects, and how longitudes map to delay/reverb/drone behavior |
 | [`dsp-design.md`](dsp-design.md) | Tape delay, FDN reverb, capture/tail buffers, and portable DSP rules |
+| [`signal-path.md`](signal-path.md) | Audio-thread signal flow diagrams for drone, capture tails, plucks, delay/reverb, and output |
 | [`capture-workflow.md`](capture-workflow.md) | Arming capture, planet tail keys, Mneme gain staging, orbit-ring feedback |
 | [`midi-control.md`](midi-control.md) | MIDI note/CC map, APVTS parameters, host automation caveats, hardware roadmap |
 

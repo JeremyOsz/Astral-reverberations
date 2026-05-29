@@ -20,6 +20,13 @@ public:
         SimulatedOrbit
     };
 
+    struct EuclideanPatternState {
+        std::array<bool, 16> hits{};
+        std::array<float, 16> levels{};
+        int activeStep = -1;
+        bool enabled = false;
+    };
+
     AstralReverberationsAudioProcessor();
     ~AstralReverberationsAudioProcessor() override = default;
 
@@ -112,6 +119,8 @@ public:
     void cycleSignEffect(astro::ZodiacSign sign);
     /// Returns the current effect role assigned to a sign marker.
     int getSignEffectAssignment(astro::ZodiacSign sign) const;
+    /// Returns a compact UI snapshot of the Euclidean pluck pattern and recent activity.
+    EuclideanPatternState getEuclideanPatternState() const;
 
     /// Builds the complete APVTS parameter layout for plugin state and automation.
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -144,6 +153,8 @@ private:
     std::atomic<float> inputLevel{0.0f};
     std::atomic<float> outputLevel{0.0f};
     std::array<int, static_cast<std::size_t>(astro::PlanetId::Count)> euclideanSteps{};
+    std::array<std::atomic<float>, 16> euclideanDisplayLevels{};
+    std::atomic<int> euclideanDisplayStep{-1};
     double simulatedJulianDay = astro::AstrologyEngine::J2000JulianDay;
     double manualJulianDay = astro::AstrologyEngine::J2000JulianDay;
     double currentSampleRate = 44100.0;

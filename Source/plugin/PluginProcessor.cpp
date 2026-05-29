@@ -35,12 +35,6 @@ juce::String planetParameterId(const char* prefix, std::size_t index)
     return juce::String(prefix) + juce::String(static_cast<int>(index));
 }
 
-// Converts a MIDI note number into equal-tempered frequency in Hz.
-float midiNoteToFrequency(int note)
-{
-    return 440.0f * std::pow(2.0f, (static_cast<float>(note) - 69.0f) / 12.0f);
-}
-
 float midiNoteToFrequency(float note)
 {
     return 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
@@ -100,6 +94,7 @@ AstralReverberationsAudioProcessor::AstralReverberationsAudioProcessor()
 {
     currentSnapshot = astrologyEngine.snapshotForJulianDay(simulatedJulianDay);
     currentDroneFrame = astroMapper.mapDroneSnapshot(currentSnapshot);
+    euclideanDisplayStep.store(-1, std::memory_order_relaxed);
     for (std::size_t index = 0; index < planetLongitudeOffsets.size(); ++index) {
         planetLongitudeOffsets[index].store(0.0f, std::memory_order_relaxed);
         planetLongitudeOffsetEnabled[index].store(false, std::memory_order_relaxed);
@@ -112,6 +107,9 @@ AstralReverberationsAudioProcessor::AstralReverberationsAudioProcessor()
         signEffectEnabled[index].store(true, std::memory_order_relaxed);
         signEffectAssignments[index].store(static_cast<int>(index), std::memory_order_relaxed);
     }
+    for (auto& level : euclideanDisplayLevels) {
+        level.store(0.0f, std::memory_order_relaxed);
+    }
     parameterState.state.setProperty(kAstroModeProperty, static_cast<int>(AstroMode::Now), nullptr);
     parameterState.state.setProperty(kManualJulianDayProperty, manualJulianDay, nullptr);
 }
@@ -121,6 +119,10 @@ void AstralReverberationsAudioProcessor::prepareToPlay(double sampleRate, int sa
     currentSampleRate = sampleRate;
     euclideanStepAccumulator = 0.0;
     euclideanSteps.fill(0);
+    euclideanDisplayStep.store(-1, std::memory_order_relaxed);
+    for (auto& level : euclideanDisplayLevels) {
+        level.store(0.0f, std::memory_order_relaxed);
+    }
     effect.prepare(sampleRate, samplesPerBlock);
     drone.prepare(sampleRate, samplesPerBlock);
     processingBuffer.setSize(2, samplesPerBlock, false, false, true);
@@ -223,6 +225,8 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
                 sample,
                 processingBuffer.getSample(1, sample) - inputCopyBuffer.getSample(1, sample));
         }
+        // Live input has been removed here, so keep the internal drone/tails in the effect dry path.
+        effectParameters.inputMonitor = true;
     }
 
     effect.processBlock(
@@ -385,8 +389,14 @@ void AstralReverberationsAudioProcessor::queueReverbTankTap(std::size_t planetIn
 
 void AstralReverberationsAudioProcessor::processEuclideanPlucks(int samplesInBlock, const astro::AstroDroneFrame& droneFrame)
 {
+    const float decay = std::pow(0.10f, static_cast<float>(std::max(0, samplesInBlock)) / static_cast<float>(std::max(1.0, currentSampleRate)) * 8.0f);
+    for (auto& level : euclideanDisplayLevels) {
+        level.store(level.load(std::memory_order_relaxed) * decay, std::memory_order_relaxed);
+    }
+
     if (getFloatParameter(parameterState, "euclid_enable") < 0.5f) {
         euclideanStepAccumulator = 0.0;
+        euclideanDisplayStep.store(-1, std::memory_order_relaxed);
         return;
     }
 
@@ -400,6 +410,10 @@ void AstralReverberationsAudioProcessor::processEuclideanPlucks(int samplesInBlo
     }
 
     while (stepsToProcess-- > 0) {
+        const int displayStep = (euclideanDisplayStep.load(std::memory_order_relaxed) + 1) % static_cast<int>(euclideanDisplayLevels.size());
+        euclideanDisplayStep.store(displayStep, std::memory_order_relaxed);
+        bool anyHit = false;
+
         for (std::size_t index = 0; index < droneFrame.layers.size(); ++index) {
             if (planetMutes[index].load(std::memory_order_relaxed)) {
                 continue;
@@ -411,10 +425,46 @@ void AstralReverberationsAudioProcessor::processEuclideanPlucks(int samplesInBlo
             const int rotation = static_cast<int>(std::round(layer.tapePosition * static_cast<float>(steps)));
             if (euclideanHit(euclideanSteps[index] + rotation, pulses, steps)) {
                 queueReverbTankTap(index, layer, getFloatParameter(parameterState, "euclid_wet"));
+                anyHit = true;
             }
             euclideanSteps[index] = (euclideanSteps[index] + 1) % steps;
         }
+
+        if (anyHit) {
+            euclideanDisplayLevels[static_cast<std::size_t>(displayStep)].store(1.0f, std::memory_order_relaxed);
+        }
     }
+}
+
+AstralReverberationsAudioProcessor::EuclideanPatternState AstralReverberationsAudioProcessor::getEuclideanPatternState() const
+{
+    EuclideanPatternState state;
+    state.enabled = getFloatParameter(parameterState, "euclid_enable") >= 0.5f;
+    state.activeStep = euclideanDisplayStep.load(std::memory_order_relaxed);
+    for (std::size_t index = 0; index < state.levels.size(); ++index) {
+        state.levels[index] = std::clamp(euclideanDisplayLevels[index].load(std::memory_order_relaxed), 0.0f, 1.0f);
+    }
+
+    const auto frame = getCurrentDroneFrameCopy();
+    for (std::size_t planetIndex = 0; planetIndex < frame.layers.size(); ++planetIndex) {
+        if (planetMutes[planetIndex].load(std::memory_order_relaxed)) {
+            continue;
+        }
+
+        const auto& layer = frame.layers[planetIndex];
+        const int steps = kEuclideanSteps[planetIndex];
+        const int pulses = std::clamp(kEuclideanPulses[planetIndex] + static_cast<int>(std::round(layer.amplitude * 2.0f)), 1, steps - 1);
+        const int rotation = static_cast<int>(std::round(layer.tapePosition * static_cast<float>(steps)));
+        for (int step = 0; step < steps; ++step) {
+            if (!euclideanHit(step + rotation, pulses, steps)) {
+                continue;
+            }
+            const auto cell = static_cast<std::size_t>(std::clamp(static_cast<int>(std::round(static_cast<float>(step) * 16.0f / static_cast<float>(steps))), 0, 15));
+            state.hits[cell] = true;
+        }
+    }
+
+    return state;
 }
 
 float AstralReverberationsAudioProcessor::getOrbitTailLevel(astro::PlanetId planet) const
@@ -553,6 +603,9 @@ dsp::PlanetaryDroneParameters AstralReverberationsAudioProcessor::readDroneParam
     parameters.harmonicSpread = resolved.harmonicSpread;
     parameters.aspectDepth = resolved.aspectDepth;
     parameters.rootFrequencyHz = getDroneRootFrequencyHz();
+    parameters.tailSize = getFloatParameter(parameterState, "tail_size");
+    parameters.tailRegen = getFloatParameter(parameterState, "tail_regen");
+    parameters.tailMode = getIntParameter(parameterState, "tail_mode", 0);
     parameters.gate = isDroneGateOpen();
     parameters.organMode = getFloatParameter(parameterState, "organ_mode") >= 0.5f;
     for (std::size_t index = 0; index < parameters.waveShapes.size(); ++index) {
@@ -821,6 +874,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioPro
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("drone_hold", "Drone On", false));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("capture_level", "Capture Level", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("capture_enable", "Capture Enable", false));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_size", "Tail Size", range(0.0f, 1.0f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_regen", "Tail Regen", range(0.0f, 1.0f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterChoice>("tail_mode", "Tail Mode", juce::StringArray{"LIM", "DIST", "SHIM"}, 0));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("organ_mode", "Organ Mode", false));
     parameters.push_back(std::make_unique<juce::AudioParameterInt>("root_note", "Root Note", 24, 84, 45));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("root_lock", "Manual Root", true));
