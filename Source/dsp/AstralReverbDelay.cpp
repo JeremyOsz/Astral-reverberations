@@ -61,6 +61,23 @@ float dbToGain(float db)
     return std::pow(10.0f, db / 20.0f);
 }
 
+float shortestUnitDelta(float target, float current)
+{
+    float delta = target - current;
+    if (delta > 0.5f) {
+        delta -= 1.0f;
+    } else if (delta < -0.5f) {
+        delta += 1.0f;
+    }
+    return delta;
+}
+
+float wrapUnit(float value)
+{
+    value -= std::floor(value);
+    return value < 0.0f ? value + 1.0f : value;
+}
+
 // Reads one zodiac effect amount from a mapped modulation frame.
 float signEffect(const astro::AstroModulationFrame& frame, astro::ZodiacSign sign)
 {
@@ -232,6 +249,7 @@ void AstralReverbDelay::reset()
     wowPhase = 0.0f;
     flutterPhase = 0.0f;
     reverbModPhase = 0.0f;
+    delayTapsInitialized = false;
 }
 
 void AstralReverbDelay::processBlock(
@@ -299,6 +317,10 @@ void AstralReverbDelay::processBlock(
     const float flutterRate = 4.7f + astroFrame.delayDrift * astroAmount * 1.2f;
     const float wowIncrement = kTwoPi * wowRate / static_cast<float>(sampleRate);
     const float flutterIncrement = kTwoPi * flutterRate / static_cast<float>(sampleRate);
+    if (!delayTapsInitialized) {
+        smoothedDelayTaps = astroFrame.delayTaps;
+        delayTapsInitialized = true;
+    }
 
     for (int sample = 0; sample < samplesToProcess; ++sample) {
         smoothedDelaySamples += 0.0025f * (targetDelaySamples - smoothedDelaySamples);
@@ -328,7 +350,12 @@ void AstralReverbDelay::processBlock(
         float nodeTapLeft = 0.0f;
         float nodeTapRight = 0.0f;
         const float nodeTapAmount = astroDepth * std::clamp(0.25f + astroFrame.delayTapDensity * 0.75f + geminiTaps * 0.35f, 0.0f, 1.25f);
-        for (const auto& tap : astroFrame.delayTaps) {
+        for (std::size_t tapIndex = 0; tapIndex < astroFrame.delayTaps.size(); ++tapIndex) {
+            const auto& targetTap = astroFrame.delayTaps[tapIndex];
+            auto& tap = smoothedDelayTaps[tapIndex];
+            tap.position01 = wrapUnit(tap.position01 + shortestUnitDelta(clamp01(targetTap.position01), tap.position01) * 0.0015f);
+            tap.level += (std::clamp(targetTap.level, 0.0f, 1.0f) - tap.level) * 0.0015f;
+            tap.pan += (std::clamp(targetTap.pan, -1.0f, 1.0f) - tap.pan) * 0.0015f;
             const float tapLevel = std::clamp(tap.level, 0.0f, 1.0f) * nodeTapAmount;
             if (tapLevel <= 0.0001f) {
                 continue;

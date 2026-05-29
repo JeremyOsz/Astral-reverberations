@@ -11,44 +11,64 @@
 namespace astral::plugin {
 namespace {
 
-constexpr int kPadding = 16;
-constexpr int kHeaderHeight = 48;
-constexpr int kInspectorWidth = 236;
+constexpr int kPadding = 12;
+constexpr int kTopBarHeight = 48;
+constexpr int kAstroBarHeight = 42;
+constexpr int kLeftPanelWidth = 220;
+constexpr int kInspectorWidth = 244;
+constexpr int kMeterWidth = 72;
+constexpr int kSummaryHeight = 78;
+constexpr int kBottomHeight = 116;
+constexpr int kPanelGap = 8;
 constexpr int kInspectorRowHeight = 32;
-constexpr int kInspectorSliderRowHeight = 32;
-constexpr int kBottomHeight = 100;
-constexpr int kInputMeterHeight = 42;
-constexpr int kInspectorToggleGridHeight = 87;
-constexpr int kInspectorFreezeRowHeight = 26;
-constexpr int kInspectorSliderCount = 10;
-constexpr int kInspectorHeaderHeight = kInspectorRowHeight * 5 + kInspectorSliderRowHeight + kInputMeterHeight;
-constexpr int kInspectorContentHeight = kInspectorHeaderHeight
-    + kInspectorSliderCount * kInspectorSliderRowHeight
-    + kInspectorToggleGridHeight
-    + kInspectorFreezeRowHeight;
+constexpr int kInspectorSliderRowHeight = 36;
 constexpr int kDefaultEditorWidth = 1220;
-constexpr int kDefaultEditorHeight = kPadding * 2 + kHeaderHeight + 10 + kInspectorContentHeight + 10 + kBottomHeight;
+constexpr int kDefaultEditorHeight = 690;
 
-juce::Rectangle<int> removeInspectorHeaderRows(juce::Rectangle<int>& inspector)
+struct EditorLayout {
+    juce::Rectangle<int> topBar;
+    juce::Rectangle<int> astroBar;
+    juce::Rectangle<int> leftPanel;
+    juce::Rectangle<int> orbitPanel;
+    juce::Rectangle<int> summaryStrip;
+    juce::Rectangle<int> inspector;
+    juce::Rectangle<int> meterColumn;
+    juce::Rectangle<int> macroStrip;
+};
+
+EditorLayout editorLayoutFor(juce::Rectangle<int> bounds)
 {
-    inspector.removeFromTop(kInspectorRowHeight);
-    inspector.removeFromTop(kInspectorRowHeight);
-    inspector.removeFromTop(kInspectorSliderRowHeight);
-    inspector.removeFromTop(kInspectorRowHeight);
-    inspector.removeFromTop(kInspectorRowHeight);
-    inspector.removeFromTop(kInspectorRowHeight);
-    return inspector.removeFromTop(kInputMeterHeight);
+    auto content = bounds.reduced(kPadding);
+    EditorLayout layout;
+    layout.topBar = content.removeFromTop(kTopBarHeight);
+    content.removeFromTop(6);
+    layout.astroBar = content.removeFromTop(kAstroBarHeight);
+    content.removeFromTop(kPanelGap);
+    layout.macroStrip = content.removeFromBottom(kBottomHeight);
+    content.removeFromBottom(kPanelGap);
+
+    layout.leftPanel = content.removeFromLeft(kLeftPanelWidth);
+    content.removeFromLeft(kPanelGap);
+    layout.meterColumn = content.removeFromRight(kMeterWidth);
+    content.removeFromRight(kPanelGap);
+    layout.inspector = content.removeFromRight(kInspectorWidth);
+    content.removeFromRight(kPanelGap);
+
+    layout.summaryStrip = content.removeFromBottom(kSummaryHeight);
+    content.removeFromBottom(kPanelGap);
+    layout.orbitPanel = content;
+    return layout;
 }
 constexpr float kOrbitRadiusFactor = 0.46f;
 constexpr float kSignMarkerOffset = 22.0f;
-constexpr float kOrbitTitleBand = 28.0f;
-constexpr float kHarmonicsStripWidth = 78.0f;
+constexpr float kOrbitTitleBand = 44.0f;
+constexpr float kHarmonicsStripWidth = 0.0f;
 constexpr float kPi = 3.14159265358979323846f;
 // Background atmosphere: texture strength and how much the dark veil dims it.
 constexpr float kEditorBackgroundTextureOpacity = 0.58f;
 constexpr float kEditorBackgroundVeilAlpha = 0.34f;
-constexpr float kOrbitMapBackgroundTextureOpacity = 0.54f;
-constexpr float kOrbitMapPanelFillAlpha = 0.76f;
+constexpr float kOrbitMapBackgroundTextureOpacity = 0.48f;
+constexpr float kOrbitMapPanelFillAlpha = 0.78f;
 constexpr int kMaxOutputParticles = 130;
 
 // Lazily decodes the generated astral texture embedded by JUCE BinaryData.
@@ -77,14 +97,289 @@ void drawAstralTexture(juce::Graphics& graphics, juce::Rectangle<float> area, fl
 // Shared panel fill for the editor's dark control surfaces.
 juce::Colour panelColour()
 {
-    return juce::Colour(27, 29, 34);
+    return juce::Colour(20, 24, 29);
 }
 
 // Shared line colour for orbit rings, ticks, and outlines.
 juce::Colour lineColour()
 {
-    return juce::Colour(73, 82, 92);
+    return juce::Colour(62, 72, 82);
 }
+
+juce::Colour goldColour()
+{
+    return juce::Colour(142, 168, 255);
+}
+
+juce::Colour cyanColour()
+{
+    return juce::Colour(105, 198, 212);
+}
+
+juce::Colour mutedTextColour()
+{
+    return juce::Colour(145, 154, 164);
+}
+
+juce::Font controlFont(float height, int style = juce::Font::plain)
+{
+#if JUCE_MAC
+    return juce::Font(juce::FontOptions("Avenir Next", height, style));
+#elif JUCE_WINDOWS
+    return juce::Font(juce::FontOptions("Segoe UI", height, style));
+#else
+    return juce::Font(juce::FontOptions("Inter", height, style));
+#endif
+}
+
+juce::Font displayFont(float height, int style = juce::Font::plain)
+{
+#if JUCE_MAC
+    return juce::Font(juce::FontOptions("Baskerville", height, style));
+#else
+    return controlFont(height, style);
+#endif
+}
+
+void drawPanel(juce::Graphics& graphics, juce::Rectangle<float> area, float alpha = 0.88f)
+{
+    juce::ColourGradient panelGradient(
+        juce::Colour(24, 29, 34).withAlpha(alpha),
+        area.getCentreX(),
+        area.getY(),
+        juce::Colour(13, 17, 21).withAlpha(alpha),
+        area.getCentreX(),
+        area.getBottom(),
+        false);
+    panelGradient.addColour(0.42, panelColour().withAlpha(alpha));
+    graphics.setGradientFill(panelGradient);
+    graphics.fillRoundedRectangle(area, 8.0f);
+
+    graphics.saveState();
+    graphics.reduceClipRegion(area.toNearestInt());
+    graphics.setColour(juce::Colour(255, 255, 255).withAlpha(0.018f));
+    for (int y = static_cast<int>(area.getY()) + 7; y < static_cast<int>(area.getBottom()); y += 9) {
+        graphics.drawHorizontalLine(y, area.getX() + 8.0f, area.getRight() - 8.0f);
+    }
+    graphics.setColour(cyanColour().withAlpha(0.018f));
+    for (int x = static_cast<int>(area.getX()) + 11; x < static_cast<int>(area.getRight()); x += 23) {
+        graphics.drawVerticalLine(x, area.getY() + 8.0f, area.getBottom() - 8.0f);
+    }
+    graphics.restoreState();
+
+    graphics.setColour(juce::Colour(255, 255, 255).withAlpha(0.035f));
+    graphics.drawRoundedRectangle(area.reduced(1.0f), 7.0f, 1.0f);
+    graphics.setColour(lineColour().withAlpha(0.42f));
+    graphics.drawRoundedRectangle(area, 8.0f, 1.0f);
+}
+
+void drawSectionTitle(juce::Graphics& graphics, juce::Rectangle<float> area, const juce::String& text)
+{
+    graphics.setFont(controlFont(11.0f, juce::Font::bold));
+    graphics.setColour(goldColour().withAlpha(0.92f));
+    graphics.drawText(text.toUpperCase(), area, juce::Justification::centredLeft);
+}
+
+void drawSmallBadge(juce::Graphics& graphics, juce::Rectangle<float> area, const juce::String& text, juce::Colour colour, bool filled)
+{
+    graphics.setColour(filled ? colour.withAlpha(0.26f) : juce::Colour(18, 20, 24).withAlpha(0.82f));
+    graphics.fillRoundedRectangle(area, 5.0f);
+    graphics.setColour(colour.withAlpha(filled ? 0.92f : 0.72f));
+    graphics.drawRoundedRectangle(area, 5.0f, 1.0f);
+    graphics.setFont(controlFont(10.0f, juce::Font::bold));
+    graphics.drawText(text, area.reduced(5.0f, 0.0f), juce::Justification::centred);
+}
+
+class AstralLookAndFeel final : public juce::LookAndFeel_V4 {
+public:
+    AstralLookAndFeel()
+    {
+        setColour(juce::ComboBox::backgroundColourId, juce::Colour(24, 31, 36));
+        setColour(juce::ComboBox::outlineColourId, lineColour().withAlpha(0.86f));
+        setColour(juce::ComboBox::textColourId, juce::Colour(234, 226, 202));
+        setColour(juce::ComboBox::arrowColourId, goldColour());
+        setColour(juce::PopupMenu::backgroundColourId, juce::Colour(18, 22, 27));
+        setColour(juce::PopupMenu::textColourId, juce::Colour(234, 226, 202));
+        setColour(juce::PopupMenu::highlightedBackgroundColourId, goldColour().withAlpha(0.22f));
+        setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(250, 242, 218));
+    }
+
+    juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override
+    {
+        return controlFont(static_cast<float>(std::min(13, std::max(10, buttonHeight / 3))), juce::Font::bold);
+    }
+
+    juce::Font getComboBoxFont(juce::ComboBox&) override
+    {
+        return controlFont(13.0f, juce::Font::bold);
+    }
+
+    juce::Font getPopupMenuFont() override
+    {
+        return controlFont(13.0f);
+    }
+
+    void drawButtonBackground(
+        juce::Graphics& graphics,
+        juce::Button& button,
+        const juce::Colour&,
+        bool isMouseOverButton,
+        bool isButtonDown) override
+    {
+        const auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
+        const bool on = button.getToggleState();
+        const auto fill = on ? goldColour().withAlpha(0.18f)
+                             : juce::Colour(24, 31, 36).withAlpha(isMouseOverButton ? 0.96f : 0.82f);
+        const auto stroke = on ? goldColour().withAlpha(0.86f)
+                               : lineColour().withAlpha(isMouseOverButton ? 0.88f : 0.62f);
+
+        graphics.setColour(isButtonDown ? fill.brighter(0.08f) : fill);
+        graphics.fillRoundedRectangle(bounds, 6.0f);
+        graphics.setColour(stroke);
+        graphics.drawRoundedRectangle(bounds, 6.0f, on ? 1.2f : 1.0f);
+    }
+
+    void drawButtonText(juce::Graphics& graphics, juce::TextButton& button, bool, bool) override
+    {
+        graphics.setFont(getTextButtonFont(button, button.getHeight()));
+        graphics.setColour(button.getToggleState() ? goldColour() : juce::Colour(232, 236, 239));
+        graphics.drawText(button.getButtonText(), button.getLocalBounds().reduced(8, 0), juce::Justification::centred);
+    }
+
+    void drawComboBox(
+        juce::Graphics& graphics,
+        int width,
+        int height,
+        bool isButtonDown,
+        int,
+        int,
+        int,
+        int,
+        juce::ComboBox& box) override
+    {
+        const auto bounds = juce::Rectangle<float>(0.5f, 0.5f, static_cast<float>(width) - 1.0f, static_cast<float>(height) - 1.0f);
+        graphics.setColour(juce::Colour(24, 31, 36).withAlpha(isButtonDown ? 0.98f : 0.88f));
+        graphics.fillRoundedRectangle(bounds, 6.0f);
+        graphics.setColour((box.hasKeyboardFocus(false) ? goldColour() : lineColour()).withAlpha(0.82f));
+        graphics.drawRoundedRectangle(bounds, 6.0f, 1.1f);
+
+        juce::Path arrow;
+        const float cx = static_cast<float>(width) - 18.0f;
+        const float cy = static_cast<float>(height) * 0.52f;
+        arrow.startNewSubPath(cx - 5.0f, cy - 3.0f);
+        arrow.lineTo(cx, cy + 3.0f);
+        arrow.lineTo(cx + 5.0f, cy - 3.0f);
+        graphics.setColour(goldColour().withAlpha(0.86f));
+        graphics.strokePath(arrow, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void positionComboBoxText(juce::ComboBox&, juce::Label& label) override
+    {
+        label.setBounds(10, 1, label.getParentWidth() - 34, label.getParentHeight() - 2);
+        label.setFont(controlFont(13.0f, juce::Font::bold));
+        label.setJustificationType(juce::Justification::centredLeft);
+    }
+
+    void drawLinearSlider(
+        juce::Graphics& graphics,
+        int x,
+        int y,
+        int width,
+        int height,
+        float sliderPos,
+        float,
+        float,
+        const juce::Slider::SliderStyle,
+        juce::Slider& slider) override
+    {
+        const auto track = juce::Rectangle<float>(
+            static_cast<float>(x) + 2.0f,
+            static_cast<float>(y) + static_cast<float>(height) * 0.5f - 2.0f,
+            static_cast<float>(width) - 8.0f,
+            4.0f);
+        graphics.setColour(juce::Colour(45, 53, 62).withAlpha(0.72f));
+        graphics.fillRoundedRectangle(track, 2.0f);
+        auto fill = track;
+        fill.setRight(juce::jlimit(track.getX(), track.getRight(), sliderPos));
+        graphics.setColour(goldColour().withAlpha(0.86f));
+        graphics.fillRoundedRectangle(fill, 2.0f);
+        const auto thumb = juce::Rectangle<float>(sliderPos - 5.0f, track.getCentreY() - 5.0f, 10.0f, 10.0f);
+        graphics.setColour(goldColour());
+        graphics.fillEllipse(thumb);
+        graphics.setColour(juce::Colour(18, 22, 27).withAlpha(0.55f));
+        graphics.drawEllipse(thumb, 1.0f);
+        slider.setColour(juce::Slider::textBoxTextColourId, juce::Colour(232, 236, 239));
+    }
+
+    void drawRotarySlider(
+        juce::Graphics& graphics,
+        int x,
+        int y,
+        int width,
+        int height,
+        float sliderPos,
+        float rotaryStartAngle,
+        float rotaryEndAngle,
+        juce::Slider&) override
+    {
+        const auto size = static_cast<float>(std::min(width, height)) - 12.0f;
+        const auto bounds = juce::Rectangle<float>(
+            static_cast<float>(x) + (static_cast<float>(width) - size) * 0.5f,
+            static_cast<float>(y) + 4.0f,
+            size,
+            size);
+        const auto angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
+        const auto centre = bounds.getCentre();
+        const float radius = bounds.getWidth() * 0.5f - 4.0f;
+
+        for (int tick = 0; tick <= 12; ++tick) {
+            const float proportion = static_cast<float>(tick) / 12.0f;
+            const float tickAngle = rotaryStartAngle + proportion * (rotaryEndAngle - rotaryStartAngle) - juce::MathConstants<float>::halfPi;
+            const float inner = radius + 3.0f;
+            const float outer = radius + (tick % 3 == 0 ? 8.0f : 6.0f);
+            const auto a = juce::Point<float>(centre.x + std::cos(tickAngle) * inner, centre.y + std::sin(tickAngle) * inner);
+            const auto b = juce::Point<float>(centre.x + std::cos(tickAngle) * outer, centre.y + std::sin(tickAngle) * outer);
+            graphics.setColour((tick % 3 == 0 ? cyanColour() : lineColour()).withAlpha(tick % 3 == 0 ? 0.38f : 0.24f));
+            graphics.drawLine(a.x, a.y, b.x, b.y, tick % 3 == 0 ? 1.2f : 0.8f);
+        }
+
+        graphics.setColour(juce::Colour(7, 9, 12).withAlpha(0.68f));
+        graphics.fillEllipse(bounds.reduced(1.0f).translated(0.0f, 2.0f));
+        graphics.setColour(lineColour().withAlpha(0.45f));
+        graphics.drawEllipse(bounds.reduced(2.0f), 1.1f);
+
+        juce::ColourGradient capGradient(
+            juce::Colour(36, 43, 50),
+            centre.x - radius * 0.45f,
+            centre.y - radius * 0.55f,
+            juce::Colour(8, 11, 15),
+            centre.x + radius * 0.42f,
+            centre.y + radius * 0.56f,
+            true);
+        capGradient.addColour(0.58, juce::Colour(17, 22, 27));
+        graphics.setGradientFill(capGradient);
+        graphics.fillEllipse(bounds.reduced(8.0f));
+        graphics.setColour(juce::Colour(255, 255, 255).withAlpha(0.045f));
+        graphics.drawEllipse(bounds.reduced(9.0f), 1.0f);
+
+        juce::Path arc;
+        arc.addCentredArc(centre.x, centre.y, radius, radius, 0.0f, rotaryStartAngle, angle, true);
+        graphics.setColour(cyanColour().withAlpha(0.92f));
+        graphics.strokePath(arc, juce::PathStrokeType(4.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const auto pointerEnd = juce::Point<float>(
+            centre.x + std::cos(angle - juce::MathConstants<float>::halfPi) * (radius - 12.0f),
+            centre.y + std::sin(angle - juce::MathConstants<float>::halfPi) * (radius - 12.0f));
+        graphics.setColour(goldColour().withAlpha(0.78f));
+        graphics.drawLine(centre.x, centre.y, pointerEnd.x, pointerEnd.y, 2.0f);
+
+        const auto thumb = juce::Point<float>(
+            centre.x + std::cos(angle - juce::MathConstants<float>::halfPi) * radius,
+            centre.y + std::sin(angle - juce::MathConstants<float>::halfPi) * radius);
+        graphics.setColour(goldColour());
+        graphics.fillEllipse(thumb.x - 4.0f, thumb.y - 4.0f, 8.0f, 8.0f);
+    }
+};
 
 // Returns a stable per-planet accent colour by planet index.
 juce::Colour accentColour(std::size_t index)
@@ -305,6 +600,7 @@ public:
     explicit OrbitMapComponent(AstralReverberationsAudioProcessor& owner)
         : processor(owner)
     {
+        selectedPlanet = astro::PlanetId::Saturn;
         startTimerHz(24);
     }
 
@@ -326,9 +622,15 @@ public:
             drawAstralTexture(graphics, layout.contentArea, kOrbitMapBackgroundTextureOpacity);
         }
 
+        auto titleArea = bounds.withHeight(kOrbitTitleBand).reduced(16.0f, 6.0f);
         graphics.setColour(juce::Colour(234, 226, 202));
-        graphics.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-        graphics.drawText("Orbit Harmony", bounds.withHeight(24.0f).reduced(16.0f, 0.0f), juce::Justification::centredLeft);
+        graphics.setFont(displayFont(18.0f, juce::Font::bold));
+        graphics.drawText("Orbit Harmony", titleArea.removeFromTop(21.0f), juce::Justification::centredLeft);
+        graphics.setColour(mutedTextColour());
+        graphics.setFont(controlFont(11.0f));
+        graphics.drawText("Planetary positions shape drone, capture tails, plucks, delay, and reverb",
+            titleArea,
+            juce::Justification::centredLeft);
 
         drawCymaticField(graphics, layout.contentArea, centre, radius, snapshot, droneFrame);
         drawOutputParticles(graphics, layout.contentArea, centre, radius);
@@ -337,8 +639,11 @@ public:
         drawAspects(graphics, snapshot, centre, radius);
         drawInteractionFeedback(graphics, centre, radius);
 
-        graphics.setColour(juce::Colour(246, 217, 116));
+        graphics.setColour(juce::Colour(125, 210, 255));
         graphics.fillEllipse(centre.x - 9.0f, centre.y - 9.0f, 18.0f, 18.0f);
+        graphics.setColour(juce::Colour(235, 239, 242));
+        graphics.setFont(controlFont(10.0f, juce::Font::bold));
+        graphics.drawText("SUN", juce::Rectangle<float>(centre.x - 24.0f, centre.y + 11.0f, 48.0f, 16.0f), juce::Justification::centred);
 
         for (std::size_t index = 0; index < snapshot.planets.size(); ++index) {
             const auto& planet = snapshot.planets[index];
@@ -362,8 +667,14 @@ public:
                 graphics.drawEllipse(position.x - 15.0f, position.y - 15.0f, 30.0f, 30.0f, 2.0f);
             }
             if (processor.hasPlanetLongitudeOffset(planet.planet)) {
-                graphics.setColour(juce::Colour(246, 217, 116).withAlpha(0.8f));
+                graphics.setColour(goldColour().withAlpha(0.8f));
                 graphics.drawEllipse(position.x - 19.0f, position.y - 19.0f, 38.0f, 38.0f, 1.6f);
+            }
+            if (selectedPlanet.has_value() && *selectedPlanet == planet.planet) {
+                graphics.setColour(goldColour().withAlpha(0.80f));
+                graphics.drawEllipse(position.x - 18.0f, position.y - 18.0f, 36.0f, 36.0f, 2.0f);
+                graphics.setColour(goldColour().withAlpha(0.14f));
+                graphics.fillEllipse(position.x - 22.0f, position.y - 22.0f, 44.0f, 44.0f);
             }
             graphics.setColour(muted ? juce::Colour(72, 78, 86) : accentColour(index));
             graphics.fillEllipse(position.x - 8.0f, position.y - 8.0f, 16.0f, 16.0f);
@@ -372,7 +683,7 @@ public:
                 graphics.drawLine(position.x - 9.0f, position.y + 9.0f, position.x + 9.0f, position.y - 9.0f, 2.0f);
             }
             graphics.setColour(juce::Colour(235, 239, 242));
-            graphics.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+            graphics.setFont(controlFont(12.0f, juce::Font::bold));
             graphics.drawText(juce::String(astro::toString(planet.planet).data()),
                 juce::Rectangle<float>(position.x + 10.0f, position.y - 9.0f, 70.0f, 18.0f),
                 juce::Justification::centredLeft);
@@ -871,7 +1182,7 @@ private:
         }
 
         const float centrePulse = 10.0f + energy * 15.0f + std::abs(std::sin(cymaticPhase * 1.6f)) * (2.0f + energy * 8.0f);
-        graphics.setColour(juce::Colour(246, 217, 116).withAlpha(0.08f + energy * 0.16f));
+        graphics.setColour(goldColour().withAlpha(0.08f + energy * 0.16f));
         graphics.drawEllipse(centre.x - centrePulse, centre.y - centrePulse, centrePulse * 2.0f, centrePulse * 2.0f, 0.8f + energy * 0.9f);
     }
 
@@ -907,7 +1218,7 @@ private:
             graphics.setColour(accentColour(particle.colourIndex).withAlpha(alpha));
             graphics.fillEllipse(bounds);
             if (output > 0.16f && size > 3.2f) {
-                graphics.setColour(juce::Colour(246, 217, 116).withAlpha(alpha * 0.12f));
+                graphics.setColour(goldColour().withAlpha(alpha * 0.12f));
                 graphics.drawEllipse(bounds.expanded(size * 0.46f), 0.7f);
             }
         }
@@ -957,7 +1268,7 @@ private:
                 pulse.radius * 2.0f);
             graphics.setColour(accentColour(pulse.colourIndex).withAlpha(alpha));
             graphics.drawEllipse(bounds, thickness);
-            graphics.setColour(juce::Colour(246, 217, 116).withAlpha(alpha * 0.38f));
+            graphics.setColour(goldColour().withAlpha(alpha * 0.38f));
             graphics.drawEllipse(bounds.expanded(3.0f + age01 * 7.0f), 0.8f);
         }
 
@@ -1000,22 +1311,23 @@ private:
             const float longitude = static_cast<float>(index) * 30.0f + 15.0f;
             const auto point = pointForLongitude(longitude, centre, markerRadius);
             const float activity = juce::jlimit(0.0f, 1.0f, signActivity[index]);
-            const auto markerBounds = juce::Rectangle<float>(point.x - 20.0f, point.y - 15.0f, 40.0f, 30.0f);
+            const auto markerBounds = juce::Rectangle<float>(point.x - 14.0f, point.y - 14.0f, 28.0f, 28.0f);
             const auto sign = static_cast<astro::ZodiacSign>(index);
             const bool enabled = processor.isSignEffectEnabled(sign);
             const auto assignment = static_cast<std::size_t>(processor.getSignEffectAssignment(sign));
-            graphics.setColour((enabled ? juce::Colour(43, 47, 54) : juce::Colour(25, 27, 31)).withAlpha(0.88f));
-            graphics.fillRoundedRectangle(markerBounds, 6.0f);
-            graphics.setColour((enabled ? juce::Colour(105, 198, 212) : juce::Colour(92, 98, 105)).withAlpha(0.22f + activity * 0.55f));
-            graphics.drawRoundedRectangle(markerBounds, 6.0f, 1.2f + activity * 1.8f);
-            graphics.setColour(enabled ? juce::Colour(235, 239, 242) : juce::Colour(105, 112, 120));
-            graphics.setFont(zodiacGlyphFont(16.0f));
-            graphics.drawText(signGlyph(index), markerBounds.withTrimmedBottom(13.0f), juce::Justification::centred);
-            graphics.setColour(enabled ? juce::Colour(185, 195, 202) : juce::Colour(91, 98, 106));
-            graphics.setFont(juce::FontOptions(8.0f));
-            graphics.drawText(signEffectLabel(assignment), markerBounds.withTrimmedTop(14.0f), juce::Justification::centred);
+            graphics.setColour((enabled ? cyanColour() : juce::Colour(92, 98, 105)).withAlpha(0.12f + activity * 0.32f));
+            graphics.drawEllipse(markerBounds, 0.8f + activity * 1.1f);
+            graphics.setColour((enabled ? juce::Colour(235, 239, 242) : juce::Colour(105, 112, 120)).withAlpha(enabled ? 0.62f : 0.36f));
+            graphics.setFont(zodiacGlyphFont(15.0f));
+            graphics.drawText(signGlyph(index), markerBounds, juce::Justification::centred);
+            if (activity > 0.01f) {
+                const auto labelBounds = markerBounds.translated(0.0f, 17.0f).expanded(10.0f, 0.0f);
+                graphics.setColour((enabled ? mutedTextColour() : juce::Colour(91, 98, 106)).withAlpha(0.42f));
+                graphics.setFont(juce::FontOptions(7.5f));
+                graphics.drawText(signEffectLabel(assignment), labelBounds, juce::Justification::centred);
+            }
             if (!enabled) {
-                graphics.drawLine(markerBounds.getX() + 7.0f, markerBounds.getBottom() - 6.0f, markerBounds.getRight() - 7.0f, markerBounds.getY() + 6.0f, 1.6f);
+                graphics.drawLine(markerBounds.getX() + 8.0f, markerBounds.getBottom() - 8.0f, markerBounds.getRight() - 8.0f, markerBounds.getY() + 8.0f, 1.0f);
             }
         }
     }
@@ -1098,7 +1410,7 @@ private:
 
         if (active || level > 0.08f) {
             const float glowSize = 11.0f + level * 13.0f;
-            graphics.setColour(juce::Colour(246, 217, 116).withAlpha(active ? 0.9f : level * 0.55f));
+            graphics.setColour(goldColour().withAlpha(active ? 0.9f : level * 0.55f));
             graphics.drawEllipse(marker.x - glowSize * 0.5f, marker.y - glowSize * 0.5f, glowSize, glowSize, 1.4f);
         }
     }
@@ -1106,6 +1418,10 @@ private:
     /// Draws the compact harmonic-layer and tail-length strip beside the orbit map.
     void drawSpectrum(juce::Graphics& graphics, juce::Rectangle<float> area, const astro::AstroDroneFrame& frame)
     {
+        if (area.getWidth() < 20.0f || area.getHeight() < 40.0f || frame.layers.empty()) {
+            return;
+        }
+
         graphics.setColour(juce::Colour(43, 47, 54));
         graphics.fillRoundedRectangle(area, 7.0f);
         graphics.setFont(juce::FontOptions(10.0f, juce::Font::bold));
@@ -1122,7 +1438,7 @@ private:
             graphics.setColour(accentColour(index).withAlpha(active ? 1.0f : 0.82f));
             graphics.fillRoundedRectangle(bar, 2.0f);
             if (active) {
-                graphics.setColour(juce::Colour(246, 217, 116));
+                graphics.setColour(goldColour());
                 graphics.drawRoundedRectangle(bar.expanded(1.0f), 2.0f, 1.2f);
             }
             graphics.setColour(juce::Colour(185, 195, 202));
@@ -1138,24 +1454,87 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     : AudioProcessorEditor(&owner),
       audioProcessor(owner),
       orbitMap(std::make_unique<OrbitMapComponent>(owner)),
-      tooltipWindow(this, 450)
+      tooltipWindow(this, 1800)
 {
+    lookAndFeel = std::make_unique<AstralLookAndFeel>();
+    setLookAndFeel(lookAndFeel.get());
     setWantsKeyboardFocus(true);
 
     titleLabel.setText("Astral Reverberations", juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
     titleLabel.setColour(juce::Label::textColourId, juce::Colour(234, 226, 202));
-    titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
+    titleLabel.setFont(displayFont(23.0f, juce::Font::bold));
     titleLabel.setTooltip("Astral Reverberations: orbit-controlled drone, capture tails, delay, and reverb.");
     addAndMakeVisible(titleLabel);
 
     statusLabel.setJustificationType(juce::Justification::centredRight);
     statusLabel.setColour(juce::Label::textColourId, juce::Colour(185, 195, 202));
-    statusLabel.setFont(juce::FontOptions(13.0f));
+    statusLabel.setFont(controlFont(11.0f));
     statusLabel.setTooltip("Shows gate state, effective root source, and live input level.");
     addAndMakeVisible(statusLabel);
 
-    controlsButton.setButtonText("Controls");
+    presetBox.addItem("Black Death in London", 1);
+    presetBox.addItem("Voyager Lullaby", 2);
+    presetBox.addItem("Custom sky", 3);
+    presetBox.setSelectedId(1, juce::dontSendNotification);
+    presetBox.setTooltip("Current preset.");
+    addAndMakeVisible(presetBox);
+
+    previousPresetButton.setButtonText("<");
+    previousPresetButton.setTooltip("Previous preset.");
+    addAndMakeVisible(previousPresetButton);
+
+    nextPresetButton.setButtonText(">");
+    nextPresetButton.setTooltip("Next preset.");
+    addAndMakeVisible(nextPresetButton);
+
+    favouriteButton.setButtonText("*");
+    favouriteButton.setClickingTogglesState(true);
+    favouriteButton.setTooltip("Favourite marker.");
+    addAndMakeVisible(favouriteButton);
+
+    aButton.setButtonText("A");
+    aButton.setTooltip("Comparison slot A.");
+    addAndMakeVisible(aButton);
+
+    bButton.setButtonText("B");
+    bButton.setTooltip("Comparison slot B.");
+    addAndMakeVisible(bButton);
+
+    copyABButton.setButtonText("A>B");
+    copyABButton.setTooltip("Copy comparison slot A to B.");
+    addAndMakeVisible(copyABButton);
+
+    scaleButton.setButtonText("100%");
+    scaleButton.setTooltip("UI scale.");
+    addAndMakeVisible(scaleButton);
+
+    settingsButton.setButtonText("...");
+    settingsButton.setTooltip("Plugin settings.");
+    addAndMakeVisible(settingsButton);
+
+    dateButton.setButtonText("May 26, 2024");
+    dateButton.setTooltip("Manual sky date. Historical presets update this internal date.");
+    addAndMakeVisible(dateButton);
+
+    timeButton.setButtonText("12:00");
+    timeButton.setTooltip("Manual sky time summary.");
+    addAndMakeVisible(timeButton);
+
+    gateModeBox.addItem("Hold", 1);
+    gateModeBox.addItem("Live", 2);
+    gateModeBox.addItem("Sustain", 3);
+    gateModeBox.setSelectedId(1, juce::dontSendNotification);
+    gateModeBox.setTooltip("Gate behaviour summary: MIDI notes open the live gate, CC64 sustains it, Drone On holds it.");
+    addAndMakeVisible(gateModeBox);
+
+    limiterButton.setButtonText("Limiter");
+    limiterButton.setClickingTogglesState(true);
+    limiterButton.setToggleState(true, juce::dontSendNotification);
+    limiterButton.setTooltip("Output limiter status indicator.");
+    addAndMakeVisible(limiterButton);
+
+    controlsButton.setButtonText("MIDI Map");
     controlsButton.setTooltip("Shows keyboard and orbit interaction controls.");
     controlsButton.onClick = [this] {
         controlsPopupVisible = !controlsPopupVisible;
@@ -1163,32 +1542,42 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     };
     addAndMakeVisible(controlsButton);
 
+    focusButton.setButtonText("Focus Map");
+    focusButton.setClickingTogglesState(true);
+    focusButton.setTooltip("Expands Orbit Harmony and hides the side, inspector, meter, and macro controls.");
+    focusButton.onClick = [this] {
+        mapFocusMode = focusButton.getToggleState();
+        controlsPopupVisible = false;
+        resized();
+        repaint();
+    };
+    addAndMakeVisible(focusButton);
+
     addAndMakeVisible(*orbitMap);
 
-    addSlider("macro_choir", "Choir", SliderLayout::Inspector);
-    addSlider("drone_level", "Drone", SliderLayout::Inspector);
-    addSlider("pluck_level", "Pluck", SliderLayout::Inspector);
-    addSlider("macro_mneme", "Mneme", SliderLayout::Inspector);
-    addSlider("capture_level", "Capture", SliderLayout::Inspector);
-    addSlider("macro_ephemeris", "Ephemeris", SliderLayout::Inspector);
-    addSlider("macro_root", "Root Drift", SliderLayout::Inspector);
     addSlider("euclid_rate", "Rate", SliderLayout::Inspector);
     addSlider("euclid_wet", "Wet", SliderLayout::Inspector);
     addSlider("reverb_decay", "Decay", SliderLayout::Inspector);
     addSlider("reverb_damping", "Damp", SliderLayout::Inspector);
     addSlider("reverb_mod", "Mod", SliderLayout::Inspector);
     addSlider("pluck_send", "Pluck Send", SliderLayout::Inspector);
+    addSlider("drone_level", "Drone", SliderLayout::Inspector);
+    addSlider("capture_level", "Capture", SliderLayout::Inspector);
     addSlider("macro_substance", "Substance", SliderLayout::Bottom);
+    addSlider("macro_choir", "Choir", SliderLayout::Bottom);
+    addSlider("macro_mneme", "Mneme", SliderLayout::Bottom);
+    addSlider("macro_ephemeris", "Ephemeris", SliderLayout::Bottom);
     addSlider("macro_fate", "Fate", SliderLayout::Bottom);
     addSlider("macro_void", "Void", SliderLayout::Bottom);
     addSlider("macro_pulse", "Ring", SliderLayout::Bottom);
+    addSlider("macro_root", "Root Drift", SliderLayout::Bottom);
     addSlider("master_eq_low", "Low", SliderLayout::Bottom);
     addSlider("master_eq_mid", "Mid", SliderLayout::Bottom);
     addSlider("master_eq_high", "High", SliderLayout::Bottom);
     addSlider("output_gain", "Output", SliderLayout::Bottom);
 
-    droneHoldButton.setButtonText("Drone On");
-    droneHoldButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    droneHoldButton.setButtonText("On");
+    droneHoldButton.setClickingTogglesState(true);
     droneHoldButton.setTooltip("Opens the drone gate without MIDI, useful in standalone mode.");
     addAndMakeVisible(droneHoldButton);
     droneHoldAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "drone_hold", droneHoldButton);
@@ -1206,8 +1595,8 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     addAndMakeVisible(rootNoteBox);
     updateRootNoteBox();
 
-    rootLockButton.setButtonText("Manual Root");
-    rootLockButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    rootLockButton.setButtonText("Manual");
+    rootLockButton.setClickingTogglesState(true);
     rootLockButton.setTooltip("Keeps the selected root stable instead of following incoming MIDI notes.");
     addAndMakeVisible(rootLockButton);
     rootLockAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "root_lock", rootLockButton);
@@ -1215,7 +1604,7 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetWaveLabel.setText("Wave", juce::dontSendNotification);
     planetWaveLabel.setJustificationType(juce::Justification::centredLeft);
     planetWaveLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
-    planetWaveLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    planetWaveLabel.setFont(controlFont(11.0f, juce::Font::bold));
     planetWaveLabel.setTooltip("Base oscillator waveform for the selected planet.");
     addAndMakeVisible(planetWaveLabel);
 
@@ -1230,7 +1619,7 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetFilterLabel.setText("Filter", juce::dontSendNotification);
     planetFilterLabel.setJustificationType(juce::Justification::centredLeft);
     planetFilterLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
-    planetFilterLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    planetFilterLabel.setFont(controlFont(11.0f, juce::Font::bold));
     planetFilterLabel.setTooltip("Low-pass tone filter for the selected planet oscillator.");
     addAndMakeVisible(planetFilterLabel);
 
@@ -1238,7 +1627,7 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetFilterSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
     planetFilterSlider.setColour(juce::Slider::trackColourId, juce::Colour(52, 58, 66));
     planetFilterSlider.setColour(juce::Slider::backgroundColourId, juce::Colour(25, 27, 31));
-    planetFilterSlider.setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+    planetFilterSlider.setColour(juce::Slider::thumbColourId, goldColour());
     planetFilterSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colour(235, 239, 242));
     planetFilterSlider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(25, 27, 31));
     planetFilterSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
@@ -1249,32 +1638,32 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetFilterSlider.setTooltip("Low-pass tone filter for the selected planet oscillator.");
     addAndMakeVisible(planetFilterSlider);
 
-    freezeButton.setButtonText("Freeze");
-    freezeButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    freezeButton.setButtonText("Hold");
+    freezeButton.setClickingTogglesState(true);
     freezeButton.setTooltip("Freezes the main delay/reverb feedback path, not the planet tail buffers.");
     addAndMakeVisible(freezeButton);
     freezeAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "freeze", freezeButton);
 
-    euclidButton.setButtonText("Euclid");
-    euclidButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    euclidButton.setButtonText("On");
+    euclidButton.setClickingTogglesState(true);
     euclidButton.setTooltip("Runs planet-position Euclidean rhythms that trigger ring plucks. Planet longitude rotates each pattern.");
     addAndMakeVisible(euclidButton);
     euclidAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "euclid_enable", euclidButton);
 
-    captureButton.setButtonText("Capture");
-    captureButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    captureButton.setButtonText("Arm");
+    captureButton.setClickingTogglesState(true);
     captureButton.setTooltip("Arms input capture. Hold number keys 1-0 to feed planet-specific orbit tails.");
     addAndMakeVisible(captureButton);
     captureAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "capture_enable", captureButton);
 
     organButton.setButtonText("Organ");
-    organButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    organButton.setClickingTogglesState(true);
     organButton.setTooltip("Maps A-; to momentary planet gates. When off, those keys toggle mute.");
     addAndMakeVisible(organButton);
     organAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "organ_mode", organButton);
 
-    inputMonitorButton.setButtonText("Input Monitor");
-    inputMonitorButton.setColour(juce::ToggleButton::textColourId, juce::Colour(235, 239, 242));
+    inputMonitorButton.setButtonText("On");
+    inputMonitorButton.setClickingTogglesState(true);
     inputMonitorButton.setTooltip("Keeps live input audible at unity level, useful for monitoring a microphone in standalone mode.");
     addAndMakeVisible(inputMonitorButton);
     inputMonitorAttachment = std::make_unique<ButtonAttachment>(audioProcessor.parameters(), "input_monitor", inputMonitorButton);
@@ -1308,9 +1697,15 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     fastButton.onClick = [this] { setParameterValue("astro_speed", 4.0f); };
     addAndMakeVisible(fastButton);
 
+    slowButton.setVisible(false);
+    normalButton.setVisible(false);
+    fastButton.setVisible(false);
+    resetPlanetButton.setVisible(false);
+    resetOrbitsButton.setVisible(false);
+
     astroModeBox.addItem("Now", 1);
     astroModeBox.addItem("Manual Date", 2);
-    astroModeBox.addItem("Simulated Orbit", 3);
+    astroModeBox.addItem("Simulated", 3);
     astroModeBox.setTooltip("Chooses orbit source: clock-based Now, fixed Manual Date, or animated Simulated Orbit. Drag offsets work in all modes.");
     astroModeBox.setSelectedId(static_cast<int>(audioProcessor.getAstroMode()) + 1, juce::dontSendNotification);
     astroModeBox.onChange = [this] {
@@ -1346,6 +1741,11 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     startTimerHz(12);
 }
 
+AstralReverberationsEditor::~AstralReverberationsEditor()
+{
+    setLookAndFeel(nullptr);
+}
+
 void AstralReverberationsEditor::paint(juce::Graphics& graphics)
 {
     graphics.fillAll(juce::Colour(16, 17, 20));
@@ -1355,7 +1755,7 @@ void AstralReverberationsEditor::paint(juce::Graphics& graphics)
     auto bounds = getLocalBounds().toFloat().reduced(8.0f);
     graphics.setColour(juce::Colour(52, 58, 66));
     graphics.drawRoundedRectangle(bounds, 8.0f, 1.5f);
-    drawInputMeter(graphics);
+    drawInterfaceChrome(graphics);
 }
 
 void AstralReverberationsEditor::paintOverChildren(juce::Graphics& graphics)
@@ -1367,6 +1767,14 @@ void AstralReverberationsEditor::paintOverChildren(juce::Graphics& graphics)
 
 bool AstralReverberationsEditor::keyPressed(const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && mapFocusMode) {
+        mapFocusMode = false;
+        focusButton.setToggleState(false, juce::dontSendNotification);
+        resized();
+        repaint();
+        return true;
+    }
+
     if (key == juce::KeyPress::escapeKey && controlsPopupVisible) {
         controlsPopupVisible = false;
         repaint();
@@ -1388,80 +1796,179 @@ bool AstralReverberationsEditor::keyStateChanged(bool)
 
 void AstralReverberationsEditor::resized()
 {
-    auto bounds = getLocalBounds().reduced(kPadding);
-    auto header = bounds.removeFromTop(kHeaderHeight);
-    titleLabel.setBounds(header.removeFromLeft(360));
-    astroModeBox.setBounds(header.removeFromRight(184).reduced(0, 10));
-    controlsButton.setBounds(header.removeFromRight(96).reduced(8, 10));
-    statusLabel.setBounds(header);
+    const auto layout = editorLayoutFor(getLocalBounds());
+    const bool showControls = !mapFocusMode;
 
-    bounds.removeFromTop(10);
-    auto bottom = bounds.removeFromBottom(kBottomHeight);
-    bounds.removeFromBottom(10);
-    auto inspector = bounds.removeFromRight(kInspectorWidth);
-    bounds.removeFromRight(10);
+    for (auto* slider : sliders) {
+        slider->setVisible(showControls);
+    }
+    for (auto* label : labels) {
+        label->setVisible(showControls);
+    }
+    if (sliders.size() > 7 && labels.size() > 7) {
+        sliders[7]->setVisible(false);
+        labels[7]->setVisible(false);
+    }
 
-    orbitMap->setBounds(bounds);
+    presetBox.setVisible(false);
+    const bool showFocusPerformance = mapFocusMode;
+    rootNoteBox.setVisible(showControls || showFocusPerformance);
+    gateModeBox.setVisible(false);
+    planetWaveBox.setVisible(showControls);
+    planetWaveLabel.setVisible(showControls);
+    planetFilterSlider.setVisible(showControls);
+    planetFilterLabel.setVisible(showControls);
+    droneHoldButton.setVisible(showControls || showFocusPerformance);
+    rootLockButton.setVisible(showControls || showFocusPerformance);
+    inputMonitorButton.setVisible(showControls || showFocusPerformance);
+    freezeButton.setVisible(showControls || showFocusPerformance);
+    captureButton.setVisible(showControls || showFocusPerformance);
+    organButton.setVisible(showControls || showFocusPerformance);
+    euclidButton.setVisible(showControls || showFocusPerformance);
+    resetPlanetButton.setVisible(false);
+    resetOrbitsButton.setVisible(false);
+    slowButton.setVisible(false);
+    normalButton.setVisible(false);
+    fastButton.setVisible(false);
+    controlsButton.setVisible(showControls);
+    previousPresetButton.setVisible(false);
+    nextPresetButton.setVisible(false);
+    favouriteButton.setVisible(false);
+    aButton.setVisible(false);
+    bButton.setVisible(false);
+    copyABButton.setVisible(false);
+    scaleButton.setVisible(false);
+    settingsButton.setVisible(false);
+    dateButton.setVisible(false);
+    timeButton.setVisible(false);
+    limiterButton.setVisible(false);
+    astroModeBox.setVisible(showControls);
+    historicalPresetBox.setVisible(showControls);
+    titleLabel.setVisible(true);
+    statusLabel.setVisible(true);
+    focusButton.setVisible(true);
+    orbitMap->setVisible(true);
+    focusButton.setButtonText(mapFocusMode ? "Exit Focus" : "Focus Map");
+    focusButton.setToggleState(mapFocusMode, juce::dontSendNotification);
 
-    auto rootRow = inspector.removeFromTop(kInspectorRowHeight).reduced(8, 2);
-    rootNoteBox.setBounds(rootRow.removeFromLeft(86));
-    rootLockButton.setBounds(rootRow);
+    if (mapFocusMode) {
+        auto bounds = getLocalBounds().reduced(kPadding);
+        auto top = bounds.removeFromTop(kTopBarHeight);
+        titleLabel.setBounds(top.reduced(10, 8).removeFromLeft(330));
+        focusButton.setBounds(top.reduced(10, 8).removeFromRight(110));
+        statusLabel.setBounds(top.reduced(10, 8).withTrimmedRight(124).withTrimmedLeft(340));
+        bounds.removeFromTop(kPanelGap);
+        orbitMap->setBounds(bounds);
 
-    auto waveRow = inspector.removeFromTop(kInspectorRowHeight).reduced(8, 2);
-    planetWaveLabel.setBounds(waveRow.removeFromLeft(54));
+        auto overlay = bounds.reduced(14).removeFromBottom(58);
+        overlay.setWidth(std::min(overlay.getWidth(), 820));
+        auto row = overlay.reduced(12, 12);
+        const int cellWidth = 76;
+        droneHoldButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(8);
+        captureButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(8);
+        freezeButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(8);
+        inputMonitorButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(8);
+        euclidButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(8);
+        organButton.setBounds(row.removeFromLeft(cellWidth).removeFromBottom(28));
+        row.removeFromLeft(14);
+        rootNoteBox.setBounds(row.removeFromLeft(78).removeFromBottom(28));
+        row.removeFromLeft(8);
+        rootLockButton.setBounds(row.removeFromLeft(92).removeFromBottom(28));
+        return;
+    }
+
+    auto top = layout.topBar.reduced(10, 8);
+    titleLabel.setBounds(top.removeFromLeft(300));
+    focusButton.setBounds(top.removeFromRight(98).reduced(4, 0));
+    statusLabel.setBounds(top);
+
+    auto astro = layout.astroBar.reduced(12, 8);
+    astroModeBox.setBounds(astro.removeFromLeft(150));
+    astro.removeFromLeft(12);
+    historicalPresetBox.setBounds(astro.removeFromLeft(330));
+    astro.removeFromLeft(12);
+    rootNoteBox.setBounds(astro.removeFromLeft(82));
+    astro.removeFromLeft(6);
+    rootLockButton.setBounds(astro.removeFromLeft(118));
+
+    auto left = layout.leftPanel.reduced(12);
+    auto footer = left.removeFromBottom(34);
+    organButton.setBounds(footer.removeFromLeft(84).reduced(0, 2));
+    footer.removeFromLeft(8);
+    controlsButton.setBounds(footer.reduced(0, 2));
+
+    left.removeFromBottom(8);
+    left.removeFromTop(24);
+    auto performance = left.removeFromTop(136);
+    auto toggleRow = performance.removeFromTop(32);
+    droneHoldButton.setBounds(toggleRow.removeFromRight(72).reduced(0, 5));
+    toggleRow = performance.removeFromTop(32);
+    captureButton.setBounds(toggleRow.removeFromRight(72).reduced(0, 5));
+    toggleRow = performance.removeFromTop(32);
+    freezeButton.setBounds(toggleRow.removeFromRight(72).reduced(0, 5));
+    toggleRow = performance.removeFromTop(32);
+    inputMonitorButton.setBounds(toggleRow.removeFromRight(72).reduced(0, 5));
+
+    left.removeFromTop(10);
+    left.removeFromTop(24);
+    auto pluck = left.removeFromTop(118);
+    euclidButton.setBounds(pluck.removeFromTop(30).removeFromRight(72).reduced(0, 4));
+    for (int index = 0; index < 2; ++index) {
+        auto row = pluck.removeFromTop(32).reduced(0, 2);
+        labels[index]->setBounds(row.removeFromLeft(64));
+        sliders[index]->setBounds(row);
+    }
+
+    orbitMap->setBounds(layout.orbitPanel);
+
+    auto inspector = layout.inspector.reduced(12);
+    inspector.removeFromTop(78);
+    auto tabs = inspector.removeFromTop(30);
+    (void)tabs;
+    inspector.removeFromTop(10);
+    auto waveRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
+    planetWaveLabel.setBounds(waveRow.removeFromLeft(92));
     planetWaveBox.setBounds(waveRow);
-
-    auto filterRow = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(8, 3);
-    planetFilterLabel.setBounds(filterRow.removeFromLeft(54));
+    auto filterRow = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 3);
+    planetFilterLabel.setBounds(filterRow.removeFromLeft(92));
     planetFilterSlider.setBounds(filterRow);
+    inspector.removeFromTop(8);
 
-    auto speedRow = inspector.removeFromTop(kInspectorRowHeight).reduced(8, 2);
+    constexpr int kInspectorLabelWidth = 84;
+    for (int index = 2; index < 7; ++index) {
+        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 3);
+        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
+        sliders[index]->setBounds(row);
+    }
+
+    inspector.removeFromTop(8);
+    auto speedRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
     const int speedWidth = speedRow.getWidth() / 3;
     slowButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
     normalButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
     fastButton.setBounds(speedRow.reduced(2, 0));
-
-    historicalPresetBox.setBounds(inspector.removeFromTop(kInspectorRowHeight).reduced(8, 2));
-
-    auto resetRow = inspector.removeFromTop(kInspectorRowHeight).reduced(8, 2);
+    auto resetRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
     resetPlanetButton.setBounds(resetRow.removeFromLeft(resetRow.getWidth() / 2).reduced(2, 0));
     resetOrbitsButton.setBounds(resetRow.reduced(2, 0));
 
-    inspector.removeFromTop(kInputMeterHeight);
+    limiterButton.setBounds(layout.meterColumn.reduced(10).removeFromBottom(32));
 
-    constexpr int kInspectorLabelWidth = 84;
-    for (int index = 0; index < 6; ++index) {
-        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(8, 3);
-        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
-        sliders[index]->setBounds(row);
-    }
-
-    auto toggleGrid = inspector.removeFromTop(kInspectorToggleGridHeight).reduced(8, 2);
-    const int toggleColumnWidth = toggleGrid.getWidth() / 2;
-    const int toggleRowHeight = toggleGrid.getHeight() / 3;
-    auto toggleTopRow = toggleGrid.removeFromTop(toggleRowHeight);
-    droneHoldButton.setBounds(toggleTopRow.removeFromLeft(toggleColumnWidth).reduced(2, 1));
-    inputMonitorButton.setBounds(toggleTopRow.reduced(2, 1));
-    auto toggleMiddleRow = toggleGrid.removeFromTop(toggleRowHeight);
-    captureButton.setBounds(toggleMiddleRow.removeFromLeft(toggleColumnWidth).reduced(2, 1));
-    euclidButton.setBounds(toggleMiddleRow.reduced(2, 1));
-    organButton.setBounds(toggleGrid.reduced(2, 1));
-
-    for (int index = 6; index < 10; ++index) {
-        auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(8, 3);
-        labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
-        sliders[index]->setBounds(row);
-    }
-
-    freezeButton.setBounds(inspector.removeFromTop(kInspectorFreezeRowHeight).reduced(8, 2));
-
-    const int bottomSliderStart = 10;
+    const int bottomSliderStart = 8;
     const int bottomSliderCount = sliders.size() - bottomSliderStart;
-    const int cellWidth = bottom.getWidth() / std::max(1, bottomSliderCount);
+    const int cellWidth = layout.macroStrip.getWidth() / std::max(1, bottomSliderCount);
     for (int index = bottomSliderStart; index < sliders.size(); ++index) {
         const int column = index - bottomSliderStart;
-        auto cell = juce::Rectangle<int>(bottom.getX() + column * cellWidth, bottom.getY(), cellWidth, bottom.getHeight()).reduced(4);
-        labels[index]->setBounds(cell.removeFromTop(14));
+        auto cell = juce::Rectangle<int>(
+            layout.macroStrip.getX() + column * cellWidth,
+            layout.macroStrip.getY(),
+            cellWidth,
+            layout.macroStrip.getHeight()).reduced(6, 8);
+        labels[index]->setBounds(cell.removeFromTop(18));
         sliders[index]->setBounds(cell);
     }
 }
@@ -1577,7 +2084,7 @@ void AstralReverberationsEditor::addSlider(const char* parameterId, const juce::
     label->setJustificationType(layout == SliderLayout::Inspector ? juce::Justification::centredLeft
                                                                   : juce::Justification::centred);
     label->setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
-    label->setFont(juce::FontOptions(layout == SliderLayout::Inspector ? 12.0f : 11.0f, juce::Font::bold));
+    label->setFont(controlFont(layout == SliderLayout::Inspector ? 11.0f : 10.0f, juce::Font::bold));
     label->setTooltip(sliderTooltip(parameter));
     addAndMakeVisible(label);
 
@@ -1587,13 +2094,13 @@ void AstralReverberationsEditor::addSlider(const char* parameterId, const juce::
         slider->setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
         slider->setColour(juce::Slider::trackColourId, juce::Colour(52, 58, 66));
         slider->setColour(juce::Slider::backgroundColourId, juce::Colour(25, 27, 31));
-        slider->setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+        slider->setColour(juce::Slider::thumbColourId, goldColour());
     } else {
         slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 58, 14);
         slider->setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(105, 198, 212));
         slider->setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(52, 58, 66));
-        slider->setColour(juce::Slider::thumbColourId, juce::Colour(243, 213, 138));
+        slider->setColour(juce::Slider::thumbColourId, goldColour());
     }
     slider->setColour(juce::Slider::textBoxTextColourId, juce::Colour(235, 239, 242));
     slider->setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(25, 27, 31));
@@ -1713,70 +2220,240 @@ void AstralReverberationsEditor::updateStatus()
             skyText = "Sky Sim";
             break;
     }
-    const auto rootText = audioProcessor.isDroneHeld()
-        ? skyText + "  Gate Hold  Root " + root + "  " + source + inputText
-        : audioProcessor.isDroneGateOpen()
-            ? skyText + "  Gate Live  Root " + root + "  " + source + inputText
-        : skyText + "  Gate Idle  Root " + root + "  " + source + inputText;
+    const auto gateText = audioProcessor.isDroneHeld() ? "Hold" : audioProcessor.isDroneGateOpen() ? "Live" : "Idle";
+    const auto rootText = skyText + "  Root " + root + "  " + gateText + "  " + source + inputText;
     statusLabel.setText(rootText, juce::dontSendNotification);
 }
 
-void AstralReverberationsEditor::drawInputMeter(juce::Graphics& graphics)
+void AstralReverberationsEditor::drawInterfaceChrome(juce::Graphics& graphics)
 {
-    auto bounds = getLocalBounds().reduced(kPadding);
-    bounds.removeFromTop(kHeaderHeight);
-    bounds.removeFromTop(10);
-    bounds.removeFromBottom(kBottomHeight);
-    bounds.removeFromBottom(10);
-    auto inspector = bounds.removeFromRight(kInspectorWidth);
+    if (mapFocusMode) {
+        auto bounds = getLocalBounds().reduced(kPadding);
+        drawPanel(graphics, bounds.removeFromTop(kTopBarHeight).toFloat(), 0.80f);
+        bounds.removeFromTop(kPanelGap);
+        auto overlay = bounds.reduced(14).removeFromBottom(58).toFloat();
+        overlay.setWidth(std::min(overlay.getWidth(), 820.0f));
+        drawPanel(graphics, overlay, 0.78f);
 
-    auto meter = removeInspectorHeaderRows(inspector).reduced(8, 4).toFloat();
-
-    const float rawLevel = juce::jlimit(0.0f, 1.0f, audioProcessor.getInputLevel());
-    const float displayLevel = std::pow(rawLevel, 0.35f);
-    const int inputPercent = static_cast<int>(std::round(rawLevel * 100.0f));
-    const bool captureEnabled = audioProcessor.parameters().getRawParameterValue("capture_enable") != nullptr
-        && audioProcessor.parameters().getRawParameterValue("capture_enable")->load() >= 0.5f;
-
-    const auto activeColour = rawLevel > 0.01f
-        ? juce::Colour(105, 198, 212)
-        : (captureEnabled ? juce::Colour(224, 111, 87) : juce::Colour(92, 98, 105));
-    const auto statusText = rawLevel > 0.01f
-        ? juce::String(inputPercent) + "%"
-        : (captureEnabled ? "CHECK INPUT" : "IDLE");
-
-    graphics.setColour(juce::Colour(25, 27, 31).withAlpha(0.94f));
-    graphics.fillRoundedRectangle(meter, 6.0f);
-    graphics.setColour(activeColour.withAlpha(captureEnabled || rawLevel > 0.01f ? 0.9f : 0.45f));
-    graphics.drawRoundedRectangle(meter, 6.0f, 1.3f);
-
-    auto labelArea = meter.removeFromTop(14.0f);
-    graphics.setFont(juce::FontOptions(9.5f, juce::Font::bold));
-    graphics.setColour(juce::Colour(235, 239, 242));
-    graphics.drawText("INPUT", labelArea.removeFromLeft(48.0f), juce::Justification::centredLeft);
-    graphics.setColour(activeColour);
-    graphics.drawText(statusText, labelArea, juce::Justification::centredRight);
-
-    auto bar = meter.reduced(0.0f, 6.0f);
-    graphics.setColour(juce::Colour(52, 58, 66));
-    graphics.fillRoundedRectangle(bar, 3.0f);
-    auto fill = bar;
-    fill.setWidth(std::max(2.0f, bar.getWidth() * displayLevel));
-    graphics.setColour(activeColour.withAlpha(rawLevel > 0.0f ? 0.95f : 0.35f));
-    graphics.fillRoundedRectangle(fill, 3.0f);
-
-    if (captureEnabled && rawLevel <= 0.01f) {
-        graphics.setFont(juce::FontOptions(7.5f, juce::Font::bold));
-        graphics.setColour(juce::Colour(224, 111, 87).withAlpha(0.85f));
-        graphics.drawText("Options > Audio input / macOS mic permission", bar.translated(0.0f, 8.0f), juce::Justification::centred);
+        auto row = overlay.reduced(12.0f, 8.0f);
+        const float cellWidth = 76.0f;
+        constexpr std::array<const char*, 8> focusLabels{{"Drone", "Capture", "Freeze", "Monitor", "Euclid", "Organ", "Root", "Mode"}};
+        graphics.setFont(controlFont(8.5f, juce::Font::bold));
+        graphics.setColour(mutedTextColour());
+        for (const auto* label : focusLabels) {
+            graphics.drawText(label, row.removeFromLeft(cellWidth), juce::Justification::centred);
+            row.removeFromLeft(label == focusLabels[5] ? 14.0f : 8.0f);
+        }
+        return;
     }
+
+    const auto layout = editorLayoutFor(getLocalBounds());
+    drawPanel(graphics, layout.topBar.toFloat(), 0.82f);
+    drawPanel(graphics, layout.astroBar.toFloat(), 0.84f);
+    drawPanel(graphics, layout.leftPanel.toFloat(), 0.86f);
+    drawPanel(graphics, layout.inspector.toFloat(), 0.88f);
+    drawPanel(graphics, layout.meterColumn.toFloat(), 0.88f);
+    drawPanel(graphics, layout.macroStrip.toFloat(), 0.86f);
+    drawSelectedPlanetSummary(graphics, layout.summaryStrip);
+    drawMeters(graphics, layout.meterColumn);
+
+    const float input = juce::jlimit(0.0f, 1.0f, audioProcessor.getInputLevel());
+    drawSmallBadge(graphics,
+        juce::Rectangle<float>(layout.astroBar.getRight() - 80.0f, layout.astroBar.getY() + 10.0f, 62.0f, 22.0f),
+        input > 0.01f ? "INPUT" : "IDLE",
+        input > 0.01f ? cyanColour() : mutedTextColour(),
+        input > 0.01f);
+
+    auto left = layout.leftPanel.toFloat().reduced(14.0f);
+    auto footer = left.removeFromBottom(34.0f);
+    footer.removeFromLeft(92.0f);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("Keyboard / MIDI", footer.reduced(0.0f, 8.0f), juce::Justification::centred);
+
+    left.removeFromBottom(8.0f);
+    drawSectionTitle(graphics, left.removeFromTop(20.0f), "Performance");
+    const auto drawPerformanceRow = [&graphics](juce::Rectangle<float> row, const juce::String& title, const juce::String& subtitle) {
+        graphics.setFont(controlFont(11.0f, juce::Font::bold));
+        graphics.setColour(juce::Colour(235, 239, 242));
+        graphics.drawText(title, row.withTrimmedRight(74.0f).removeFromTop(18.0f), juce::Justification::centredLeft);
+        graphics.setFont(controlFont(9.5f));
+        graphics.setColour(mutedTextColour());
+        graphics.drawText(subtitle, row.withTrimmedRight(74.0f).translated(0.0f, 16.0f), juce::Justification::centredLeft);
+    };
+    drawPerformanceRow(left.removeFromTop(32.0f), "DRONE", "Sustain cosmic bed");
+    drawPerformanceRow(left.removeFromTop(32.0f), "CAPTURE", "Sample input to orbit");
+    drawPerformanceRow(left.removeFromTop(32.0f), "FREEZE", "Hold delay and reverb");
+    drawPerformanceRow(left.removeFromTop(32.0f), "INPUT MONITOR", "Hear dry input");
+
+    left.removeFromTop(10.0f);
+    drawSectionTitle(graphics, left.removeFromTop(20.0f), "Pluck Engine");
+    auto euclidRow = left.removeFromTop(30.0f);
+    drawPerformanceRow(euclidRow, "EUCLIDEAN", "Generative plucks");
+    auto pattern = left.removeFromTop(24.0f).withTrimmedLeft(66.0f);
+    for (int step = 0; step < 16; ++step) {
+        auto cell = pattern.removeFromLeft(9.5f).reduced(1.2f, 3.0f);
+        const bool hit = step == 0 || step == 3 || step == 7 || step == 11 || step == 14;
+        graphics.setColour(hit ? cyanColour().withAlpha(0.86f) : lineColour().withAlpha(0.52f));
+        graphics.fillRoundedRectangle(cell, 1.4f);
+    }
+    left.removeFromTop(56.0f);
+
+    left.removeFromTop(10.0f);
+    drawSectionTitle(graphics, left.removeFromTop(20.0f), "Root & Gate");
+    graphics.setFont(controlFont(9.5f, juce::Font::bold));
+    graphics.setColour(juce::Colour(235, 239, 242));
+    graphics.drawText("MIDI root follows lowest held note.", left.removeFromTop(24.0f), juce::Justification::centredLeft);
+    auto rootGateRow = left.removeFromTop(24.0f);
+    graphics.setColour(goldColour());
+    graphics.drawText("Root " + noteName(audioProcessor.getDroneRootNote()), rootGateRow.removeFromLeft(72.0f), juce::Justification::centredLeft);
+    graphics.setColour(audioProcessor.isDroneGateOpen() ? cyanColour() : mutedTextColour());
+    graphics.drawText(audioProcessor.isDroneGateOpen() ? "Gate live" : "Gate idle", rootGateRow, juce::Justification::centredLeft);
+
+    auto inspector = layout.inspector.toFloat().reduced(14.0f);
+    const auto selected = orbitMap->getSelectedPlanet();
+    const auto selectedIndex = static_cast<std::size_t>(selected);
+    graphics.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    graphics.setColour(goldColour());
+    graphics.drawText("SELECTED PLANET", inspector.removeFromTop(18.0f), juce::Justification::centredLeft);
+    auto nameRow = inspector.removeFromTop(44.0f);
+    graphics.setColour(accentColour(selectedIndex).withAlpha(0.24f));
+    graphics.fillEllipse(nameRow.getX(), nameRow.getY() + 4.0f, 32.0f, 32.0f);
+    graphics.setColour(accentColour(selectedIndex));
+    graphics.drawEllipse(nameRow.getX(), nameRow.getY() + 4.0f, 32.0f, 32.0f, 1.4f);
+    graphics.setFont(juce::FontOptions(20.0f, juce::Font::bold));
+    graphics.setColour(juce::Colour(234, 226, 202));
+    graphics.drawText(juce::String(astro::toString(selected).data()).toUpperCase(), nameRow.withTrimmedLeft(42.0f), juce::Justification::centredLeft);
+    drawSmallBadge(graphics,
+        nameRow.removeFromRight(70.0f).withSizeKeepingCentre(62.0f, 22.0f),
+        audioProcessor.isPlanetMuted(selected) ? "MUTED" : "ACTIVE",
+        audioProcessor.isPlanetMuted(selected) ? juce::Colour(224, 111, 87) : goldColour(),
+        !audioProcessor.isPlanetMuted(selected));
+    graphics.setFont(controlFont(10.0f, juce::Font::bold));
+    graphics.setColour(goldColour());
+    graphics.drawText("Sound", inspector.removeFromTop(24.0f), juce::Justification::centredLeft);
+}
+
+void AstralReverberationsEditor::drawSelectedPlanetSummary(juce::Graphics& graphics, juce::Rectangle<int> area)
+{
+    drawPanel(graphics, area.toFloat(), 0.86f);
+    auto content = area.toFloat().reduced(14.0f, 10.0f);
+    const auto selected = orbitMap->getSelectedPlanet();
+    const auto selectedIndex = static_cast<std::size_t>(selected);
+    const auto snapshot = audioProcessor.getCurrentSnapshotCopy();
+    const auto& planet = snapshot.planets[selectedIndex];
+    const auto sign = astro::AstrologyEngine::signForLongitude(planet.longitudeDegrees);
+    auto right = content.removeFromRight(285.0f);
+    content.removeFromRight(16.0f);
+    graphics.setColour(accentColour(selectedIndex).withAlpha(0.22f));
+    graphics.fillEllipse(content.getX(), content.getY() + 5.0f, 46.0f, 46.0f);
+    graphics.setColour(accentColour(selectedIndex));
+    graphics.drawEllipse(content.getX(), content.getY() + 5.0f, 46.0f, 46.0f, 1.4f);
+
+    auto text = content.withTrimmedLeft(58.0f);
+    graphics.setFont(controlFont(18.0f, juce::Font::bold));
+    graphics.setColour(juce::Colour(234, 226, 202));
+    graphics.drawText(juce::String(astro::toString(selected).data()).toUpperCase(), text.removeFromTop(22.0f), juce::Justification::centredLeft);
+
+    auto status = text.removeFromTop(22.0f);
+    graphics.setFont(controlFont(10.0f, juce::Font::bold));
+    graphics.setColour(audioProcessor.isPlanetMuted(selected) ? juce::Colour(224, 111, 87) : goldColour());
+    graphics.drawText(audioProcessor.isPlanetMuted(selected) ? "Muted" : "Active", status.removeFromLeft(58.0f), juce::Justification::centredLeft);
+    graphics.setColour(audioProcessor.isManualOrbitTailActive(selected) ? cyanColour() : mutedTextColour());
+    graphics.drawText(audioProcessor.isManualOrbitTailActive(selected) ? "Capturing" : "Tail held", status, juce::Justification::centredLeft);
+
+    graphics.setFont(controlFont(10.0f));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("Orbit tone, tail, and aspect response.", text.removeFromTop(18.0f), juce::Justification::centredLeft);
+
+    auto meta = right.removeFromLeft(150.0f).withTrimmedTop(8.0f);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("SIGN", meta.removeFromTop(13.0f), juce::Justification::centredLeft);
+    graphics.setFont(controlFont(12.0f, juce::Font::bold));
+    graphics.setColour(juce::Colour(235, 239, 242));
+    graphics.drawText(juce::String(astro::toString(sign).data()), meta.removeFromTop(17.0f), juce::Justification::centredLeft);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("SPEED", meta.removeFromTop(13.0f), juce::Justification::centredLeft);
+    graphics.setFont(controlFont(12.0f, juce::Font::bold));
+    graphics.setColour(juce::Colour(235, 239, 242));
+    graphics.drawText(juce::String(planet.speed, 2) + " deg/day", meta.removeFromTop(17.0f), juce::Justification::centredLeft);
+
+    auto aspects = right.withTrimmedLeft(8.0f).withTrimmedTop(8.0f);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("ASPECTS", aspects.removeFromTop(14.0f), juce::Justification::centredLeft);
+    graphics.setFont(controlFont(10.0f));
+    graphics.setColour(juce::Colour(235, 239, 242));
+    int drawn = 0;
+    for (const auto& aspect : snapshot.aspects) {
+        if (aspect.a != selected && aspect.b != selected) {
+            continue;
+        }
+        const auto other = aspect.a == selected ? aspect.b : aspect.a;
+        graphics.drawText(juce::String(astro::toString(aspect.type).data()) + " " + juce::String(astro::toString(other).data()),
+            aspects.removeFromTop(16.0f),
+            juce::Justification::centredLeft);
+        if (++drawn >= 2) {
+            break;
+        }
+    }
+    if (drawn == 0) {
+        graphics.drawText("No close aspects", aspects.removeFromTop(16.0f), juce::Justification::centredLeft);
+    }
+}
+
+void AstralReverberationsEditor::drawMeters(juce::Graphics& graphics, juce::Rectangle<int> meterColumn)
+{
+    auto area = meterColumn.toFloat().reduced(12.0f, 14.0f);
+    graphics.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    graphics.setColour(goldColour());
+    graphics.drawText("OUTPUT", area.removeFromTop(18.0f), juce::Justification::centred);
+    const float output = juce::jlimit(0.0f, 1.0f, audioProcessor.getOutputLevel());
+    const float display = std::pow(output, 0.34f);
+    const float db = juce::Decibels::gainToDecibels(std::max(output, 0.0001f));
+    graphics.setFont(juce::FontOptions(13.0f));
+    graphics.setColour(juce::Colour(235, 239, 242));
+    graphics.drawText(output <= 0.0001f ? "-inf dB" : juce::String(db, 1) + " dB", area.removeFromTop(24.0f), juce::Justification::centred);
+
+    auto meters = area.removeFromTop(290.0f).reduced(8.0f, 10.0f);
+    const float barWidth = (meters.getWidth() - 8.0f) * 0.5f;
+    for (int channel = 0; channel < 2; ++channel) {
+        auto bar = juce::Rectangle<float>(meters.getX() + static_cast<float>(channel) * (barWidth + 8.0f), meters.getY(), barWidth, meters.getHeight());
+        graphics.setColour(juce::Colour(14, 16, 20));
+        graphics.fillRoundedRectangle(bar, 4.0f);
+        auto fill = bar.reduced(3.0f);
+        fill.setTop(fill.getBottom() - fill.getHeight() * display);
+        const auto colour = output > 0.92f ? juce::Colour(224, 111, 87) : output > 0.68f ? juce::Colour(171, 132, 255) : juce::Colour(110, 214, 189);
+        graphics.setColour(colour.withAlpha(0.92f));
+        graphics.fillRoundedRectangle(fill, 3.0f);
+        graphics.setColour(lineColour().withAlpha(0.62f));
+        graphics.drawRoundedRectangle(bar, 4.0f, 1.0f);
+    }
+
+    auto warning = area.removeFromTop(24.0f);
+    drawSmallBadge(graphics, warning.reduced(0.0f, 2.0f), output > 0.96f ? "CLIP" : "SAFE", output > 0.96f ? juce::Colour(224, 111, 87) : cyanColour(), output > 0.96f);
+    area.removeFromTop(10.0f);
+    graphics.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    graphics.setColour(mutedTextColour());
+    graphics.drawText("INPUT", area.removeFromTop(14.0f), juce::Justification::centred);
+    const float input = juce::jlimit(0.0f, 1.0f, audioProcessor.getInputLevel());
+    auto inputBar = area.removeFromTop(12.0f);
+    graphics.setColour(lineColour().withAlpha(0.7f));
+    graphics.fillRoundedRectangle(inputBar, 3.0f);
+    auto inputFill = inputBar;
+    inputFill.setWidth(inputBar.getWidth() * std::pow(input, 0.35f));
+    graphics.setColour(cyanColour());
+    graphics.fillRoundedRectangle(inputFill, 3.0f);
 }
 
 void AstralReverberationsEditor::drawControlsPopup(juce::Graphics& graphics)
 {
+    const auto layout = editorLayoutFor(getLocalBounds());
     auto popup = juce::Rectangle<float>(
-        static_cast<float>(getWidth() - kInspectorWidth - 332),
-        static_cast<float>(kPadding + kHeaderHeight + 8),
+        static_cast<float>(layout.inspector.getX() - 332),
+        static_cast<float>(layout.astroBar.getBottom() + 8),
         320.0f,
         338.0f);
 
@@ -1821,7 +2498,7 @@ void AstralReverberationsEditor::drawControlsPopup(juce::Graphics& graphics)
     };
 
     drawLegendRow(content.removeFromTop(24.0f), "Q-P", "play Karplus ring plucks", juce::Colour(105, 198, 212));
-    drawLegendRow(content.removeFromTop(24.0f), "1-0", "hold with Capture on to feed audio tails", juce::Colour(246, 217, 116));
+    drawLegendRow(content.removeFromTop(24.0f), "1-0", "hold with Capture on to feed audio tails", goldColour());
     drawLegendRow(content.removeFromTop(24.0f), "Eu", "toggle planet-rotated Euclidean plucks", juce::Colour(123, 196, 165));
     drawLegendRow(
         content.removeFromTop(24.0f),

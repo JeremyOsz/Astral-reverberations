@@ -115,10 +115,12 @@ private:
     OnePoleLowPass masterHighLeft;
     OnePoleLowPass masterHighRight;
     KarplusPluck reverbTankPluck;
+    std::array<astro::AstroModulationFrame::DelayTap, static_cast<std::size_t>(astro::PlanetId::Count)> smoothedDelayTaps{};
     float smoothedDelaySamples = 1.0f;
     float wowPhase = 0.0f;
     float flutterPhase = 0.0f;
     float reverbModPhase = 0.0f;
+    bool delayTapsInitialized = false;
 
     /// Processes the internal four-line reverb network for one stereo sample.
     void processReverbSample(

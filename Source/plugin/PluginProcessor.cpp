@@ -212,18 +212,17 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
             0.0f,
             1.0f);
     }
-    const bool inputMonitorEnabled = effectParameters.inputMonitor;
-    effectParameters.inputMonitor = false;
-
-    for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
-        processingBuffer.setSample(
-            0,
-            sample,
-            processingBuffer.getSample(0, sample) - inputCopyBuffer.getSample(0, sample));
-        processingBuffer.setSample(
-            1,
-            sample,
-            processingBuffer.getSample(1, sample) - inputCopyBuffer.getSample(1, sample));
+    if (!effectParameters.inputMonitor) {
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
+            processingBuffer.setSample(
+                0,
+                sample,
+                processingBuffer.getSample(0, sample) - inputCopyBuffer.getSample(0, sample));
+            processingBuffer.setSample(
+                1,
+                sample,
+                processingBuffer.getSample(1, sample) - inputCopyBuffer.getSample(1, sample));
+        }
     }
 
     effect.processBlock(
@@ -231,19 +230,6 @@ void AstralReverberationsAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         {processingBuffer.getWritePointer(0), processingBuffer.getWritePointer(1), buffer.getNumSamples()},
         effectParameters,
         astroFrame);
-
-    if (inputMonitorEnabled) {
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample) {
-            processingBuffer.setSample(
-                0,
-                sample,
-                processingBuffer.getSample(0, sample) + inputCopyBuffer.getSample(0, sample));
-            processingBuffer.setSample(
-                1,
-                sample,
-                processingBuffer.getSample(1, sample) + inputCopyBuffer.getSample(1, sample));
-        }
-    }
 
     buffer.copyFrom(0, 0, processingBuffer, 0, 0, buffer.getNumSamples());
     buffer.copyFrom(1, 0, processingBuffer, 1, 0, buffer.getNumSamples());

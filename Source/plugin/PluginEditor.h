@@ -14,7 +14,7 @@ class OrbitMapComponent;
 class AstralReverberationsEditor final : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit AstralReverberationsEditor(AstralReverberationsAudioProcessor& processor);
-    ~AstralReverberationsEditor() override = default;
+    ~AstralReverberationsEditor() override;
 
     /// Paints the editor background frame.
     void paint(juce::Graphics& graphics) override;
@@ -34,26 +34,41 @@ private:
 
     AstralReverberationsAudioProcessor& audioProcessor;
     std::unique_ptr<OrbitMapComponent> orbitMap;
+    std::unique_ptr<juce::LookAndFeel_V4> lookAndFeel;
     juce::OwnedArray<juce::Slider> sliders;
     juce::OwnedArray<juce::Label> labels;
+    juce::ComboBox presetBox;
     juce::ComboBox rootNoteBox;
+    juce::ComboBox gateModeBox;
     juce::ComboBox planetWaveBox;
     juce::Label planetWaveLabel;
     juce::Slider planetFilterSlider;
     juce::Label planetFilterLabel;
-    juce::ToggleButton droneHoldButton;
-    juce::ToggleButton rootLockButton;
-    juce::ToggleButton inputMonitorButton;
-    juce::ToggleButton freezeButton;
-    juce::ToggleButton captureButton;
-    juce::ToggleButton organButton;
-    juce::ToggleButton euclidButton;
+    juce::TextButton droneHoldButton;
+    juce::TextButton rootLockButton;
+    juce::TextButton inputMonitorButton;
+    juce::TextButton freezeButton;
+    juce::TextButton captureButton;
+    juce::TextButton organButton;
+    juce::TextButton euclidButton;
     juce::TextButton resetPlanetButton;
     juce::TextButton resetOrbitsButton;
     juce::TextButton slowButton;
     juce::TextButton normalButton;
     juce::TextButton fastButton;
     juce::TextButton controlsButton;
+    juce::TextButton focusButton;
+    juce::TextButton previousPresetButton;
+    juce::TextButton nextPresetButton;
+    juce::TextButton favouriteButton;
+    juce::TextButton aButton;
+    juce::TextButton bButton;
+    juce::TextButton copyABButton;
+    juce::TextButton scaleButton;
+    juce::TextButton settingsButton;
+    juce::TextButton dateButton;
+    juce::TextButton timeButton;
+    juce::TextButton limiterButton;
     juce::ComboBox astroModeBox;
     juce::ComboBox historicalPresetBox;
     juce::Label titleLabel;
@@ -73,6 +88,7 @@ private:
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> captureKeyWasDown{};
     std::array<bool, static_cast<std::size_t>(astro::PlanetId::Count)> muteKeyWasDown{};
     bool controlsPopupVisible = false;
+    bool mapFocusMode = false;
     bool syncingHistoricalPresetUi = false;
     astro::PlanetId attachedPlanetControls = astro::PlanetId::Count;
 
@@ -95,8 +111,12 @@ private:
     void applyHistoricalPreset(std::size_t presetIndex);
     /// Keeps the preset combo aligned with the stored manual Julian day.
     void syncHistoricalPresetBox();
-    /// Draws the dedicated live input meter in the right inspector strip.
-    void drawInputMeter(juce::Graphics& graphics);
+    /// Draws the static panel chrome, labels, and live meters behind controls.
+    void drawInterfaceChrome(juce::Graphics& graphics);
+    /// Draws the selected-planet summary bridge below the orbit map.
+    void drawSelectedPlanetSummary(juce::Graphics& graphics, juce::Rectangle<int> area);
+    /// Draws the dedicated live input and output meters.
+    void drawMeters(juce::Graphics& graphics, juce::Rectangle<int> meterColumn);
     /// Draws the controls reference popup.
     void drawControlsPopup(juce::Graphics& graphics);
 
