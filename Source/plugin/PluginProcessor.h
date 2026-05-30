@@ -23,6 +23,16 @@ public:
     struct EuclideanPatternState {
         std::array<bool, 16> hits{};
         std::array<float, 16> levels{};
+        struct Lane {
+            std::array<bool, 20> hits{};
+            float level = 0.0f;
+            int steps = 16;
+            int pulses = 0;
+            int activeStep = -1;
+            astro::PlanetId planet = astro::PlanetId::Sun;
+            bool muted = false;
+        };
+        std::array<Lane, static_cast<std::size_t>(astro::PlanetId::Count)> lanes{};
         int activeStep = -1;
         bool enabled = false;
     };
@@ -153,6 +163,7 @@ private:
     std::atomic<float> inputLevel{0.0f};
     std::atomic<float> outputLevel{0.0f};
     std::array<int, static_cast<std::size_t>(astro::PlanetId::Count)> euclideanSteps{};
+    std::array<std::atomic<float>, static_cast<std::size_t>(astro::PlanetId::Count)> euclideanPlanetDisplayLevels{};
     std::array<std::atomic<float>, 16> euclideanDisplayLevels{};
     std::atomic<int> euclideanDisplayStep{-1};
     double simulatedJulianDay = astro::AstrologyEngine::J2000JulianDay;

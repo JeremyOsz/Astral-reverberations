@@ -60,6 +60,16 @@ juce::NormalisableRange<float> range(float start, float end, float interval = 0.
     return {start, end, interval, skew};
 }
 
+float withNeutralOffset(float macroValue, float controlValue, float neutralValue, float minimum, float maximum)
+{
+    return std::clamp(macroValue + (controlValue - neutralValue), minimum, maximum);
+}
+
+float withNeutralRatio(float macroValue, float controlValue, float neutralValue, float minimum, float maximum)
+{
+    return std::clamp(macroValue * (controlValue / std::max(0.0001f, neutralValue)), minimum, maximum);
+}
+
 bool euclideanHit(int step, int pulses, int steps)
 {
     if (steps <= 0 || pulses <= 0) {
@@ -110,6 +120,9 @@ AstralReverberationsAudioProcessor::AstralReverberationsAudioProcessor()
     for (auto& level : euclideanDisplayLevels) {
         level.store(0.0f, std::memory_order_relaxed);
     }
+    for (auto& level : euclideanPlanetDisplayLevels) {
+        level.store(0.0f, std::memory_order_relaxed);
+    }
     parameterState.state.setProperty(kAstroModeProperty, static_cast<int>(AstroMode::Now), nullptr);
     parameterState.state.setProperty(kManualJulianDayProperty, manualJulianDay, nullptr);
 }
@@ -121,6 +134,9 @@ void AstralReverberationsAudioProcessor::prepareToPlay(double sampleRate, int sa
     euclideanSteps.fill(0);
     euclideanDisplayStep.store(-1, std::memory_order_relaxed);
     for (auto& level : euclideanDisplayLevels) {
+        level.store(0.0f, std::memory_order_relaxed);
+    }
+    for (auto& level : euclideanPlanetDisplayLevels) {
         level.store(0.0f, std::memory_order_relaxed);
     }
     effect.prepare(sampleRate, samplesPerBlock);
@@ -375,7 +391,7 @@ void AstralReverberationsAudioProcessor::queueReverbTankTap(std::size_t planetIn
     float frequencyHz = getDroneRootFrequencyHz();
     const float harmonicSpread = std::clamp(resolved.harmonicSpread, 0.0f, 1.0f);
     const float ratio = std::clamp(1.0f + (layer.ratio - 1.0f) * harmonicSpread, 0.125f, 12.0f);
-    const float octaveOffset = resolved.pluckOctave;
+    const float octaveOffset = std::clamp(resolved.pluckOctave + getFloatParameter(parameterState, "pluck_octave"), -3.0f, 3.0f);
     frequencyHz = std::clamp(frequencyHz * ratio * centsToRatio(layer.detuneCents) * std::pow(2.0f, octaveOffset), 35.0f, 2400.0f);
 
     pendingReverbTankTapPan.store(std::clamp(layer.pan, -1.0f, 1.0f), std::memory_order_relaxed);
@@ -393,10 +409,16 @@ void AstralReverberationsAudioProcessor::processEuclideanPlucks(int samplesInBlo
     for (auto& level : euclideanDisplayLevels) {
         level.store(level.load(std::memory_order_relaxed) * decay, std::memory_order_relaxed);
     }
+    for (auto& level : euclideanPlanetDisplayLevels) {
+        level.store(level.load(std::memory_order_relaxed) * decay, std::memory_order_relaxed);
+    }
 
     if (getFloatParameter(parameterState, "euclid_enable") < 0.5f) {
         euclideanStepAccumulator = 0.0;
         euclideanDisplayStep.store(-1, std::memory_order_relaxed);
+        for (auto& level : euclideanPlanetDisplayLevels) {
+            level.store(0.0f, std::memory_order_relaxed);
+        }
         return;
     }
 
@@ -425,6 +447,7 @@ void AstralReverberationsAudioProcessor::processEuclideanPlucks(int samplesInBlo
             const int rotation = static_cast<int>(std::round(layer.tapePosition * static_cast<float>(steps)));
             if (euclideanHit(euclideanSteps[index] + rotation, pulses, steps)) {
                 queueReverbTankTap(index, layer, getFloatParameter(parameterState, "euclid_wet"));
+                euclideanPlanetDisplayLevels[index].store(1.0f, std::memory_order_relaxed);
                 anyHit = true;
             }
             euclideanSteps[index] = (euclideanSteps[index] + 1) % steps;
@@ -447,18 +470,26 @@ AstralReverberationsAudioProcessor::EuclideanPatternState AstralReverberationsAu
 
     const auto frame = getCurrentDroneFrameCopy();
     for (std::size_t planetIndex = 0; planetIndex < frame.layers.size(); ++planetIndex) {
-        if (planetMutes[planetIndex].load(std::memory_order_relaxed)) {
-            continue;
-        }
-
         const auto& layer = frame.layers[planetIndex];
         const int steps = kEuclideanSteps[planetIndex];
         const int pulses = std::clamp(kEuclideanPulses[planetIndex] + static_cast<int>(std::round(layer.amplitude * 2.0f)), 1, steps - 1);
         const int rotation = static_cast<int>(std::round(layer.tapePosition * static_cast<float>(steps)));
+        auto& lane = state.lanes[planetIndex];
+        lane.planet = layer.planet;
+        lane.steps = steps;
+        lane.pulses = pulses;
+        lane.activeStep = euclideanSteps[planetIndex];
+        lane.muted = planetMutes[planetIndex].load(std::memory_order_relaxed);
+        lane.level = lane.muted ? 0.0f : std::clamp(euclideanPlanetDisplayLevels[planetIndex].load(std::memory_order_relaxed), 0.0f, 1.0f);
+        if (lane.muted) {
+            continue;
+        }
+
         for (int step = 0; step < steps; ++step) {
             if (!euclideanHit(step + rotation, pulses, steps)) {
                 continue;
             }
+            lane.hits[static_cast<std::size_t>(step)] = true;
             const auto cell = static_cast<std::size_t>(std::clamp(static_cast<int>(std::round(static_cast<float>(step) * 16.0f / static_cast<float>(steps))), 0, 15));
             state.hits[cell] = true;
         }
@@ -566,24 +597,24 @@ dsp::AstralParameters AstralReverberationsAudioProcessor::readParameters() const
 {
     const auto resolved = resolveMacroParameters(readMacroControls(parameterState));
     dsp::AstralParameters parameters;
-    parameters.mix = resolved.mix;
-    parameters.delayLevel = resolved.delayLevel;
-    parameters.reverbLevel = resolved.reverbLevel;
-    parameters.delayTimeMs = resolved.delayTimeMs;
-    parameters.feedback = resolved.feedback;
-    parameters.space = resolved.space;
-    parameters.tone = resolved.tone;
+    parameters.mix = withNeutralOffset(resolved.mix, getFloatParameter(parameterState, "mix"), 0.35f, 0.0f, 1.0f);
+    parameters.delayLevel = withNeutralOffset(resolved.delayLevel, getFloatParameter(parameterState, "delay_level"), 0.45f, 0.0f, 1.0f);
+    parameters.reverbLevel = withNeutralOffset(resolved.reverbLevel, getFloatParameter(parameterState, "reverb_level"), 0.55f, 0.0f, 1.0f);
+    parameters.delayTimeMs = withNeutralRatio(resolved.delayTimeMs, getFloatParameter(parameterState, "delay_time"), 420.0f, 40.0f, 2000.0f);
+    parameters.feedback = withNeutralOffset(resolved.feedback, getFloatParameter(parameterState, "feedback"), 0.42f, 0.0f, 0.95f);
+    parameters.space = withNeutralOffset(resolved.space, getFloatParameter(parameterState, "space"), 0.55f, 0.0f, 1.0f);
+    parameters.tone = withNeutralOffset(resolved.tone, getFloatParameter(parameterState, "tone"), 0.55f, 0.0f, 1.0f);
     parameters.reverbDecay = getFloatParameter(parameterState, "reverb_decay");
     parameters.reverbDamping = getFloatParameter(parameterState, "reverb_damping");
     parameters.reverbModDepth = getFloatParameter(parameterState, "reverb_mod");
     parameters.pluckSend = getFloatParameter(parameterState, "pluck_send");
-    parameters.modDepth = resolved.modDepth;
-    parameters.wowFlutter = resolved.wowFlutter;
-    parameters.drive = resolved.drive;
-    parameters.astroAmount = resolved.astroAmount;
+    parameters.modDepth = withNeutralOffset(resolved.modDepth, getFloatParameter(parameterState, "mod_depth"), 0.35f, 0.0f, 1.0f);
+    parameters.wowFlutter = withNeutralOffset(resolved.wowFlutter, getFloatParameter(parameterState, "wow_flutter"), 0.25f, 0.0f, 1.0f);
+    parameters.drive = withNeutralOffset(resolved.drive, getFloatParameter(parameterState, "drive"), 0.15f, 0.0f, 1.0f);
+    parameters.astroAmount = withNeutralOffset(resolved.astroAmount, getFloatParameter(parameterState, "astro_amount"), 0.5f, 0.0f, 1.0f);
     parameters.astroSpeed = getFloatParameter(parameterState, "astro_speed");
     parameters.pluckLevel = std::clamp(getFloatParameter(parameterState, "pluck_level"), 0.0f, 1.5f);
-    parameters.pluckTimbre = resolved.pluckTimbre;
+    parameters.pluckTimbre = withNeutralOffset(resolved.pluckTimbre, getFloatParameter(parameterState, "pluck_timbre"), 0.5f, 0.0f, 1.0f);
     parameters.freeze = getFloatParameter(parameterState, "freeze") >= 0.5f;
     parameters.inputMonitor = getFloatParameter(parameterState, "input_monitor") >= 0.5f;
     parameters.eqLowGainDb = getFloatParameter(parameterState, "master_eq_low");
