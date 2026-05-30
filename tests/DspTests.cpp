@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using namespace astral::dsp;
@@ -35,6 +36,19 @@ float absoluteDifferenceSum(const std::vector<float>& a, const std::vector<float
         sum += std::abs(a[index] - b[index]);
     }
     return sum;
+}
+
+void fillNoise(std::vector<float>& left, std::vector<float>& right)
+{
+    std::uint32_t state = 0x2468ace1u;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        state = state * 1664525u + 1013904223u;
+        const float leftNoise = static_cast<float>((state >> 8) & 0xffffu) / 32767.5f - 1.0f;
+        state = state * 1664525u + 1013904223u;
+        const float rightNoise = static_cast<float>((state >> 8) & 0xffffu) / 32767.5f - 1.0f;
+        left[index] = leftNoise * 0.2f;
+        right[index] = rightNoise * 0.2f;
+    }
 }
 
 int zeroCrossings(const std::vector<float>& values)
@@ -221,6 +235,173 @@ void runDspTests()
     require(absoluteDifferenceSum(baselineLeft, nodeLeft) > 0.01f, "planet node taps change the left delay pattern");
     require(absoluteDifferenceSum(baselineRight, nodeRight) > 0.01f, "planet node taps change the right delay pattern");
 
+    AstralReverbDelay legacyEqBypassDelay;
+    legacyEqBypassDelay.prepare(48000.0, 512);
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    std::vector<float> bypassLeft(sampleCount, 0.0f);
+    std::vector<float> bypassRight(sampleCount, 0.0f);
+    std::vector<float> legacyEqLeft(sampleCount, 0.0f);
+    std::vector<float> legacyEqRight(sampleCount, 0.0f);
+    inputLeft[0] = 0.65f;
+    inputRight[0] = -0.35f;
+
+    AstralParameters filterParameters;
+    filterParameters.mix = 0.0f;
+    filterParameters.delayLevel = 0.0f;
+    filterParameters.reverbLevel = 0.0f;
+    filterParameters.feedback = 0.0f;
+    filterParameters.inputMonitor = true;
+    legacyEqBypassDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {bypassLeft.data(), bypassRight.data(), sampleCount},
+        filterParameters,
+        frame);
+
+    legacyEqBypassDelay.reset();
+    filterParameters.eqLowGainDb = -12.0f;
+    filterParameters.eqMidGainDb = 9.0f;
+    filterParameters.eqHighGainDb = 12.0f;
+    legacyEqBypassDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {legacyEqLeft.data(), legacyEqRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    require(absoluteDifferenceSum(bypassLeft, legacyEqLeft) < 0.0001f, "legacy EQ gains are ignored when the new filter is off on left");
+    require(absoluteDifferenceSum(bypassRight, legacyEqRight) < 0.0001f, "legacy EQ gains are ignored when the new filter is off on right");
+
+    AstralReverbDelay wetBypassDelay;
+    AstralReverbDelay wetFilterDelay;
+    wetBypassDelay.prepare(48000.0, 512);
+    wetFilterDelay.prepare(48000.0, 512);
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    bypassLeft.assign(sampleCount, 0.0f);
+    bypassRight.assign(sampleCount, 0.0f);
+    std::vector<float> filteredLeft(sampleCount, 0.0f);
+    std::vector<float> filteredRight(sampleCount, 0.0f);
+    inputLeft[0] = 1.0f;
+    inputRight[0] = 1.0f;
+    filterParameters = parameters;
+    filterParameters.filterRoute = 0;
+    filterParameters.filterCutoffHz = 650.0f;
+    filterParameters.filterResonance = 0.45f;
+    filterParameters.filterRadiate = 0.7f;
+    wetBypassDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {bypassLeft.data(), bypassRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    filterParameters.filterRoute = 2;
+    wetFilterDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {filteredLeft.data(), filteredRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    require(allFinite(filteredLeft), "wet-routed filter left output remains finite");
+    require(allFinite(filteredRight), "wet-routed filter right output remains finite");
+    require(peak(filteredLeft) < 4.0f, "wet-routed filter left output is bounded");
+    require(peak(filteredRight) < 4.0f, "wet-routed filter right output is bounded");
+    require(absoluteDifferenceSum(bypassLeft, filteredLeft) > 0.01f, "wet-routed filter changes the left impulse tail");
+    require(absoluteDifferenceSum(bypassRight, filteredRight) > 0.01f, "wet-routed filter changes the right impulse tail");
+
+    AstralReverbDelay dryFilterDelay;
+    dryFilterDelay.prepare(48000.0, 512);
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    bypassLeft.assign(sampleCount, 0.0f);
+    bypassRight.assign(sampleCount, 0.0f);
+    filteredLeft.assign(sampleCount, 0.0f);
+    filteredRight.assign(sampleCount, 0.0f);
+    for (int index = 0; index < sampleCount; ++index) {
+        const float source = index % 2 == 0 ? 0.35f : -0.35f;
+        inputLeft[static_cast<std::size_t>(index)] = source;
+        inputRight[static_cast<std::size_t>(index)] = source;
+    }
+    filterParameters = {};
+    filterParameters.mix = 0.0f;
+    filterParameters.delayLevel = 0.0f;
+    filterParameters.reverbLevel = 0.0f;
+    filterParameters.feedback = 0.0f;
+    filterParameters.inputMonitor = true;
+    legacyEqBypassDelay.reset();
+    legacyEqBypassDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {bypassLeft.data(), bypassRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    filterParameters.filterRoute = 1;
+    filterParameters.filterMode = 0;
+    filterParameters.filterCutoffHz = 400.0f;
+    filterParameters.filterResonance = 0.2f;
+    filterParameters.filterRadiate = 0.0f;
+    dryFilterDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {filteredLeft.data(), filteredRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    require(absoluteDifferenceSum(bypassLeft, filteredLeft) > 0.01f, "dry-routed filter changes monitored dry left input");
+    require(peak(filteredLeft) < peak(bypassLeft), "dry-routed low-pass reduces high-frequency dry left input");
+    require(peak(filteredRight) < peak(bypassRight), "dry-routed low-pass reduces high-frequency dry right input");
+
+    for (int mode = 0; mode < 4; ++mode) {
+        AstralReverbDelay modeDelay;
+        modeDelay.prepare(48000.0, 512);
+        fillNoise(inputLeft, inputRight);
+        filteredLeft.assign(sampleCount, 0.0f);
+        filteredRight.assign(sampleCount, 0.0f);
+        filterParameters = {};
+        filterParameters.mix = 0.0f;
+        filterParameters.delayLevel = 0.0f;
+        filterParameters.reverbLevel = 0.0f;
+        filterParameters.feedback = 0.0f;
+        filterParameters.inputMonitor = true;
+        filterParameters.filterRoute = 1;
+        filterParameters.filterMode = mode;
+        filterParameters.filterCutoffHz = 1800.0f;
+        filterParameters.filterResonance = 0.65f;
+        filterParameters.filterRadiate = 0.5f;
+        modeDelay.processBlock(
+            {inputLeft.data(), inputRight.data(), sampleCount},
+            {filteredLeft.data(), filteredRight.data(), sampleCount},
+            filterParameters,
+            frame);
+        require(allFinite(filteredLeft), "filter mode left output remains finite");
+        require(allFinite(filteredRight), "filter mode right output remains finite");
+        require(peak(filteredLeft) < 2.0f, "filter mode left output is bounded");
+        require(peak(filteredRight) < 2.0f, "filter mode right output is bounded");
+    }
+
+    AstralReverbDelay monoDelay;
+    monoDelay.prepare(48000.0, 512);
+    for (int index = 0; index < sampleCount; ++index) {
+        const float source = 0.18f * std::sin(2.0f * 3.14159265358979323846f * 680.0f * static_cast<float>(index) / 48000.0f)
+            + 0.10f * std::sin(2.0f * 3.14159265358979323846f * 2200.0f * static_cast<float>(index) / 48000.0f);
+        inputLeft[static_cast<std::size_t>(index)] = source;
+        inputRight[static_cast<std::size_t>(index)] = source;
+    }
+    filteredLeft.assign(sampleCount, 0.0f);
+    filteredRight.assign(sampleCount, 0.0f);
+    filterParameters = {};
+    filterParameters.mix = 0.0f;
+    filterParameters.delayLevel = 0.0f;
+    filterParameters.reverbLevel = 0.0f;
+    filterParameters.feedback = 0.0f;
+    filterParameters.inputMonitor = true;
+    filterParameters.filterRoute = 1;
+    filterParameters.filterMode = 1;
+    filterParameters.filterCutoffHz = 1200.0f;
+    filterParameters.filterResonance = 0.6f;
+    filterParameters.filterRadiate = 0.95f;
+    monoDelay.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {filteredLeft.data(), filteredRight.data(), sampleCount},
+        filterParameters,
+        frame);
+    require(absoluteDifferenceSum(filteredLeft, filteredRight) > 0.01f, "filter radiate creates stereo difference from mono input");
+    require(peak(filteredLeft) < 1.5f, "radiate left output avoids excessive peak growth");
+    require(peak(filteredRight) < 1.5f, "radiate right output avoids excessive peak growth");
+
     PlanetaryDrone drone;
     drone.prepare(48000.0, 512);
 
@@ -369,6 +550,8 @@ void runDspTests()
     require(allFinite(outputRight), "manual orbit tail right output remains finite");
     require(peak(outputLeft) > 0.001f, "active manual orbit tail captures audible left input");
     require(peak(outputRight) > 0.001f, "active manual orbit tail captures audible right input");
+    const auto levelWhileHeld = drone.getTailLevels()[static_cast<std::size_t>(astral::astro::PlanetId::Sun)];
+    require(levelWhileHeld > 0.2f, "manual orbit tail reports captured energy while held");
 
     std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
     std::fill(inputRight.begin(), inputRight.end(), 0.0f);
@@ -456,6 +639,55 @@ void runDspTests()
     const float shortTailRemainder = renderTailRemainder(astral::astro::PlanetId::Sun);
     const float longTailRemainder = renderTailRemainder(astral::astro::PlanetId::Pluto);
     require(longTailRemainder > shortTailRemainder, "longer orbit tail decays more slowly than shorter tail");
+
+    drone.reset();
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    for (auto& layer : droneFrame.layers) {
+        layer.amplitude = 0.0f;
+        layer.tailSeconds = 2.0f;
+    }
+    auto& sunLayer = droneFrame.layers[static_cast<std::size_t>(astral::astro::PlanetId::Sun)];
+    sunLayer.amplitude = 1.0f;
+    sunLayer.pan = 0.0f;
+    droneParameters.droneLevel = 0.0f;
+    droneParameters.captureLevel = 0.8f;
+    droneParameters.captureEnabled = true;
+    droneParameters.gate = false;
+    droneParameters.tailRegen = 0.0f;
+    droneParameters.tailSize = 0.0f;
+    droneParameters.tailMode = 0;
+    droneParameters.manualLayerGates.fill(false);
+    droneParameters.manualLayerGates[static_cast<std::size_t>(astral::astro::PlanetId::Sun)] = true;
+    for (int index = 0; index < sampleCount; ++index) {
+        const float source = 0.22f * std::sin(2.0f * 3.14159265358979323846f * 220.0f * static_cast<float>(index) / 48000.0f);
+        inputLeft[static_cast<std::size_t>(index)] = source;
+        inputRight[static_cast<std::size_t>(index)] = source;
+    }
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+    const float heldTailLevel = drone.getTailLevels()[static_cast<std::size_t>(astral::astro::PlanetId::Sun)];
+
+    std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);
+    std::fill(inputRight.begin(), inputRight.end(), 0.0f);
+    std::fill(outputLeft.begin(), outputLeft.end(), 0.0f);
+    std::fill(outputRight.begin(), outputRight.end(), 0.0f);
+    droneParameters.manualLayerGates.fill(false);
+    drone.processBlock(
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        {outputLeft.data(), outputRight.data(), sampleCount},
+        {inputLeft.data(), inputRight.data(), sampleCount},
+        droneParameters,
+        droneFrame);
+    const float releasedTailLevel = drone.getTailLevels()[static_cast<std::size_t>(astral::astro::PlanetId::Sun)];
+    require(releasedTailLevel < heldTailLevel, "manual orbit tail display level decays after capture release");
+    require(releasedTailLevel > 0.0f, "manual orbit tail display level remains visible during release decay");
 
     drone.reset();
     std::fill(inputLeft.begin(), inputLeft.end(), 0.0f);

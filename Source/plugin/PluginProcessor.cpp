@@ -617,9 +617,11 @@ dsp::AstralParameters AstralReverberationsAudioProcessor::readParameters() const
     parameters.pluckTimbre = withNeutralOffset(resolved.pluckTimbre, getFloatParameter(parameterState, "pluck_timbre"), 0.5f, 0.0f, 1.0f);
     parameters.freeze = getFloatParameter(parameterState, "freeze") >= 0.5f;
     parameters.inputMonitor = getFloatParameter(parameterState, "input_monitor") >= 0.5f;
-    parameters.eqLowGainDb = getFloatParameter(parameterState, "master_eq_low");
-    parameters.eqMidGainDb = getFloatParameter(parameterState, "master_eq_mid");
-    parameters.eqHighGainDb = getFloatParameter(parameterState, "master_eq_high");
+    parameters.filterRoute = getIntParameter(parameterState, "filter_route", 0);
+    parameters.filterMode = getIntParameter(parameterState, "filter_mode", 0);
+    parameters.filterCutoffHz = std::clamp(getFloatParameter(parameterState, "filter_cutoff"), 35.0f, 16000.0f);
+    parameters.filterResonance = std::clamp(getFloatParameter(parameterState, "filter_resonance"), 0.0f, 1.0f);
+    parameters.filterRadiate = std::clamp(getFloatParameter(parameterState, "filter_radiate"), 0.0f, 1.0f);
     parameters.outputGain = std::clamp(getFloatParameter(parameterState, "output_gain"), 0.0f, 2.0f);
     return parameters;
 }
@@ -871,31 +873,31 @@ void AstralReverberationsAudioProcessor::applyPlanetLongitudeOffsets(astro::Astr
 juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> parameters;
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_substance", "Substance", range(0.0f, 1.0f), 0.42f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_mneme", "Mneme", range(0.0f, 1.0f), 0.38f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_choir", "Choir", range(0.0f, 1.0f), 0.52f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_ephemeris", "Ephemeris", range(0.0f, 1.0f), 0.5f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_fate", "Fate", range(0.0f, 1.0f), 0.48f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_void", "Void", range(0.0f, 1.0f), 0.54f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_pulse", "Pulse", range(0.0f, 1.0f), 0.58f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_substance", "Mix", range(0.0f, 1.0f), 0.42f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_mneme", "Tail Memory", range(0.0f, 1.0f), 0.38f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_choir", "Voices", range(0.0f, 1.0f), 0.52f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_ephemeris", "Orbit Mod", range(0.0f, 1.0f), 0.5f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_fate", "Echo", range(0.0f, 1.0f), 0.48f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_void", "Reverb", range(0.0f, 1.0f), 0.54f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_pulse", "Pluck", range(0.0f, 1.0f), 0.58f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("macro_root", "Root Drift", range(0.0f, 1.0f), 0.5f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("mix", "Wet Mix", range(0.0f, 1.0f), 0.35f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("delay_level", "Tape Echo Level", range(0.0f, 1.0f), 0.45f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_level", "Space Reverb Level", range(0.0f, 1.0f), 0.55f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("delay_time", "Tape Echo Time", range(40.0f, 2000.0f, 0.0f, 0.45f), 420.0f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("feedback", "Tape Regeneration", range(0.0f, 0.95f), 0.42f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("space", "Reverb Tank Size", range(0.0f, 1.0f), 0.55f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tone", "Tape/Reverb Tone", range(0.0f, 1.0f), 0.55f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_decay", "Reverb Decay", range(0.0f, 1.0f), 0.5f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_damping", "Reverb Damping", range(0.0f, 1.0f), 0.45f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_mod", "Reverb Modulation", range(0.0f, 1.0f), 0.35f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("delay_level", "Echo Level", range(0.0f, 1.0f), 0.45f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_level", "Reverb Level", range(0.0f, 1.0f), 0.55f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("delay_time", "Echo Time", range(40.0f, 2000.0f, 0.0f, 0.45f), 420.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("feedback", "Echo Feedback", range(0.0f, 0.95f), 0.42f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("space", "Reverb Size", range(0.0f, 1.0f), 0.55f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tone", "Echo/Reverb Tone", range(0.0f, 1.0f), 0.55f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_decay", "Reverb Regen", range(0.0f, 1.0f), 0.5f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_damping", "Reverb Damp", range(0.0f, 1.0f), 0.45f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("reverb_mod", "Reverb Motion", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_timbre", "Pluck Timbre", range(0.0f, 1.0f), 0.5f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_level", "Pluck Level", range(0.0f, 1.5f), 1.0f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_send", "Pluck Send", range(0.0f, 2.5f), 1.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_send", "Tap In", range(0.0f, 2.5f), 1.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("pluck_octave", "Pluck Octave", range(-2.0f, 2.0f, 1.0f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("mod_depth", "Orbit Mod Depth", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("wow_flutter", "Tape Wow/Flutter", range(0.0f, 1.0f), 0.25f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("drive", "Tape Drive", range(0.0f, 1.0f), 0.15f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("drive", "Echo Drive", range(0.0f, 1.0f), 0.15f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("astro_amount", "Astro Mod Amount", range(0.0f, 1.0f), 0.5f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("astro_speed", "Simulated Orbit Speed", range(0.1f, 8.0f, 0.0f, 0.5f), 1.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("euclid_enable", "Euclidean Plucks", false));
@@ -905,8 +907,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioPro
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("drone_hold", "Drone On", false));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("capture_level", "Capture Level", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("capture_enable", "Capture Enable", false));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_size", "Tail Size", range(0.0f, 1.0f), 0.0f));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_regen", "Tail Regen", range(0.0f, 1.0f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_size", "Tail Length", range(0.0f, 1.0f), 0.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("tail_regen", "Tail Feedback", range(0.0f, 1.0f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>("tail_mode", "Tail Mode", juce::StringArray{"LIM", "DIST", "SHIM"}, 0));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("organ_mode", "Organ Mode", false));
     parameters.push_back(std::make_unique<juce::AudioParameterInt>("root_note", "Root Note", 24, 84, 45));
@@ -929,6 +931,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout AstralReverberationsAudioPro
     }
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("freeze", "Freeze", false));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("input_monitor", "Input Monitor", false));
+    parameters.push_back(std::make_unique<juce::AudioParameterChoice>("filter_route", "Filter Route", juce::StringArray{"Off", "Dry", "Wet"}, 0));
+    parameters.push_back(std::make_unique<juce::AudioParameterChoice>("filter_mode", "Filter Mode", juce::StringArray{"LP", "BP", "HP", "Notch"}, 0));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("filter_cutoff", "Filter Cutoff", range(35.0f, 16000.0f, 0.0f, 0.35f), 1200.0f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("filter_resonance", "Filter Q", range(0.0f, 1.0f), 0.25f));
+    parameters.push_back(std::make_unique<juce::AudioParameterFloat>("filter_radiate", "Filter Radiate", range(0.0f, 1.0f), 0.35f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_low", "Master EQ Low", range(-12.0f, 12.0f, 0.1f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_mid", "Master EQ Mid", range(-12.0f, 12.0f, 0.1f), 0.0f));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("master_eq_high", "Master EQ High", range(-12.0f, 12.0f, 0.1f), 0.0f));

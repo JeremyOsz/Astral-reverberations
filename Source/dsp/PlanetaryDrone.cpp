@@ -25,6 +25,18 @@ float softLimit(float value)
     return std::tanh(sanitize(value));
 }
 
+float softLimitAbove(float value, float knee, float headroom)
+{
+    const float sanitized = sanitize(value);
+    const float magnitude = std::abs(sanitized);
+    if (magnitude <= knee) {
+        return sanitized;
+    }
+
+    const float limited = knee + std::tanh((magnitude - knee) / std::max(0.001f, headroom)) * headroom;
+    return std::copysign(limited, sanitized);
+}
+
 // Converts detune cents into a frequency multiplier.
 float centsToRatio(float cents)
 {
@@ -156,6 +168,7 @@ void PlanetaryDrone::ManualTailBuffer::reset()
     std::fill(right.begin(), right.end(), 0.0f);
     writeIndex = 0;
     envelope = 0.0f;
+    displayLevel = 0.0f;
     smoothedDelaySamples = 0.0f;
     shimmerDcLeft = 0.0f;
     shimmerDcRight = 0.0f;
@@ -199,8 +212,10 @@ float PlanetaryDrone::ManualTailBuffer::process(
 
     envelope += (targetEnvelope - envelope) * envelopeStep;
 
-    const float excitationLeft = active ? inputLeft * level * leftGain : 0.0f;
-    const float excitationRight = active ? inputRight * level * rightGain : 0.0f;
+    const float sourceLeft = mode == 0 ? softLimitAbove(inputLeft, 0.92f, 0.30f) : sanitize(inputLeft);
+    const float sourceRight = mode == 0 ? softLimitAbove(inputRight, 0.92f, 0.30f) : sanitize(inputRight);
+    const float excitationLeft = active ? sourceLeft * level * leftGain : 0.0f;
+    const float excitationRight = active ? sourceRight * level * rightGain : 0.0f;
     float feedbackLeft = leftDelayed;
     float feedbackRight = rightDelayed;
     if (mode == 1) {
@@ -221,8 +236,8 @@ float PlanetaryDrone::ManualTailBuffer::process(
     float writeRight = excitationRight + feedbackRight * feedback;
     if (mode == 0) {
         const float limiterDrive = 1.0f + regen * 0.9f;
-        writeLeft = softLimit(writeLeft * limiterDrive);
-        writeRight = softLimit(writeRight * limiterDrive);
+        writeLeft = softLimitAbove(writeLeft * limiterDrive, 0.94f, 0.28f);
+        writeRight = softLimitAbove(writeRight * limiterDrive, 0.94f, 0.28f);
     } else if (mode == 1) {
         const float outputTrim = 0.78f - regen * 0.08f;
         writeLeft = softLimit(writeLeft * (1.0f + regen * 2.2f)) * outputTrim;
@@ -233,9 +248,24 @@ float PlanetaryDrone::ManualTailBuffer::process(
     right[writeIndex] = sanitize(writeRight);
     writeIndex = (writeIndex + 1) % size;
 
+    if (active) {
+        const float capturedEnergy = std::max(std::abs(sourceLeft), std::abs(sourceRight)) * level;
+        displayLevel = std::max(displayLevel, std::clamp(capturedEnergy * 4.5f, 0.0f, 1.0f));
+    } else {
+        const float decayPerSample = std::pow(0.01f, 1.0f / (std::clamp(tailSeconds, 1.0f, 180.0f) * static_cast<float>(std::max(1.0, sampleRate))));
+        displayLevel *= decayPerSample;
+        if (displayLevel < 0.000001f) {
+            displayLevel = 0.0f;
+        }
+    }
+
     const float outputDrive = mode == 1 ? 1.0f + regen * 1.6f : 1.0f;
-    rightOut = softLimit(rightDelayed * outputDrive) * level * envelope;
-    return softLimit(leftDelayed * outputDrive) * level * envelope;
+    const float outputLeft = mode == 0 ? softLimitAbove(leftDelayed * outputDrive, 0.98f, 0.25f)
+                                       : softLimit(leftDelayed * outputDrive);
+    const float outputRight = mode == 0 ? softLimitAbove(rightDelayed * outputDrive, 0.98f, 0.25f)
+                                        : softLimit(rightDelayed * outputDrive);
+    rightOut = outputRight * level * envelope;
+    return outputLeft * level * envelope;
 }
 
 void PlanetaryDrone::prepare(double newSampleRate, int)
@@ -300,7 +330,6 @@ void PlanetaryDrone::processBlock(
         + frame.rootReinforcement * aspectDepth * 0.18f
         + frame.consonantBloom * aspectDepth * 0.22f;
     const float beatingDepth = frame.tensionBeating * aspectDepth;
-    std::array<float, kLayerCount> blockTailPeaks{};
     bool anyManualCaptureHeld = false;
     if (parameters.captureEnabled) {
         for (std::size_t index = 0; index < parameters.manualLayerGates.size(); ++index) {
@@ -367,7 +396,7 @@ void PlanetaryDrone::processBlock(
                 ? (blockUseExternalCapture ? captureInRight : voice * rightGain)
                 : captureInRight;
             bool tailReplacingLayer = manualCaptureHeld;
-            if (captureLevel > 0.0f) {
+            if (captureLevel > 0.0f || tailLevels[index] > 0.000001f) {
                 float tailRight = 0.0f;
                 const float tailSeconds = shapedTailSeconds(layer.tailSeconds, parameters.tailSize);
                 const float tailLeft = manualTails[index].process(
@@ -384,8 +413,6 @@ void PlanetaryDrone::processBlock(
                 manualLeft += tailLeft;
                 manualRight += tailRight;
                 const float delayedEnergy = std::max(std::abs(tailLeft), std::abs(tailRight));
-                const float activeEnergy = manualCaptureHeld ? std::max(std::abs(tailSourceLeft), std::abs(tailSourceRight)) * captureLevel * layer.amplitude : 0.0f;
-                blockTailPeaks[index] = std::max(blockTailPeaks[index], std::max(delayedEnergy, activeEnergy));
                 tailReplacingLayer = manualCaptureHeld || manualTails[index].isReplacingLayer() || delayedEnergy > 0.000001f;
             }
 
@@ -425,8 +452,8 @@ void PlanetaryDrone::processBlock(
     }
 
     for (std::size_t index = 0; index < tailLevels.size(); ++index) {
-        const float target = std::clamp(blockTailPeaks[index] * 36.0f, 0.0f, 1.0f);
-        const float coefficient = target > tailLevels[index] ? 0.72f : 0.035f;
+        const float target = std::clamp(manualTails[index].getDisplayLevel(), 0.0f, 1.0f);
+        const float coefficient = target > tailLevels[index] ? 0.72f : 0.14f;
         tailLevels[index] += (target - tailLevels[index]) * coefficient;
     }
 }

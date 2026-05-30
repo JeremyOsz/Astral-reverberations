@@ -190,6 +190,18 @@ void drawSmallBadge(juce::Graphics& graphics, juce::Rectangle<float> area, const
     graphics.drawText(text, area.reduced(5.0f, 0.0f), juce::Justification::centred);
 }
 
+void drawProcessorHeader(juce::Graphics& graphics, juce::Rectangle<float> area, const juce::String& text, juce::Colour colour)
+{
+    auto header = area.reduced(0.0f, 1.0f);
+    graphics.setColour(colour.withAlpha(0.07f));
+    graphics.fillRoundedRectangle(header, 3.0f);
+    graphics.setColour(colour.withAlpha(0.82f));
+    graphics.fillRoundedRectangle(header.removeFromLeft(3.0f), 1.5f);
+    graphics.setFont(controlFont(9.0f, juce::Font::bold));
+    graphics.setColour(colour.withAlpha(0.94f));
+    graphics.drawText(text, area.reduced(8.0f, 0.0f), juce::Justification::centredLeft);
+}
+
 class AstralLookAndFeel final : public juce::LookAndFeel_V4 {
 public:
     AstralLookAndFeel()
@@ -552,13 +564,13 @@ juce::String signEffectLabel(std::size_t index)
 juce::String sliderTooltip(const juce::String& parameterId)
 {
     if (parameterId == "macro_substance") {
-        return "Presence macro: wet blend, echo/verb send, and output level.";
+        return "Mix macro: wet blend, echo/reverb send, and output level.";
     }
     if (parameterId == "macro_mneme") {
-        return "Memory macro: capture tails, orbit echo path, and safer feedback when tails are hot.";
+        return "Tail Memory macro: capture tails, orbit echo path, and safer feedback when tails are hot.";
     }
     if (parameterId == "capture_level") {
-        return "Orbit tail capture strength when Capture is armed (scaled by Mneme).";
+        return "Orbit tail capture strength when Capture is armed (scaled by Tail Memory).";
     }
     if (parameterId == "tail_size") {
         return "Scales planet capture tails from normal holds into very long memory loops.";
@@ -582,7 +594,7 @@ juce::String sliderTooltip(const juce::String& parameterId)
         return "Echo macro: delay time, repeats, wobble, and saturation.";
     }
     if (parameterId == "macro_void") {
-        return "Space macro: reverb size, darkness, and reverb emphasis.";
+        return "Reverb macro: tank size, darkness, and reverb emphasis.";
     }
     if (parameterId == "macro_pulse") {
         return "Pluck macro: timbre and octave spread (Euclidean rate/wet are separate).";
@@ -590,17 +602,26 @@ juce::String sliderTooltip(const juce::String& parameterId)
     if (parameterId == "delay_time") {
         return "Main echo time, offset from the Echo macro.";
     }
+    if (parameterId == "delay_level") {
+        return "Echo output level, offset from the Mix and Echo macros.";
+    }
     if (parameterId == "feedback") {
-        return "Echo repeat regeneration, offset from the Echo macro.";
+        return "Echo feedback/regeneration, offset from the Echo macro.";
     }
     if (parameterId == "wow_flutter") {
         return "Tape-style delay wobble, offset from the Echo macro.";
     }
+    if (parameterId == "drive") {
+        return "Tape-style echo saturation, offset from the Echo macro.";
+    }
+    if (parameterId == "reverb_level") {
+        return "Reverb output level, offset from the Mix and Reverb macros.";
+    }
     if (parameterId == "space") {
-        return "Reverb tank size, offset from the Space macro.";
+        return "Reverb tank size, offset from the Reverb macro.";
     }
     if (parameterId == "tone") {
-        return "Shared echo/tank brightness, offset from the Space macro.";
+        return "Shared echo/tank brightness, offset from the Reverb macro.";
     }
     if (parameterId == "euclid_rate") {
         return "Sets the Euclidean pluck sequencer step rate in steps per second.";
@@ -618,16 +639,25 @@ juce::String sliderTooltip(const juce::String& parameterId)
         return "Stereo motion depth inside the reverb tank.";
     }
     if (parameterId == "pluck_send") {
-        return "Extra send/headroom for orbit taps and Euclidean plucks into the reverb tank.";
+        return "Send amount from orbit taps and Euclidean plucks into the reverb tank.";
+    }
+    if (parameterId == "filter_cutoff") {
+        return "Cutoff frequency for the routed stereo multimode filter.";
+    }
+    if (parameterId == "filter_resonance") {
+        return "Resonance amount for the routed stereo multimode filter.";
+    }
+    if (parameterId == "filter_radiate") {
+        return "Stereo cutoff spread for the routed multimode filter.";
     }
     if (parameterId.startsWith("master_eq_")) {
-        return "Master three-band EQ gain after delay and reverb.";
+        return "Legacy preset-compatible EQ parameter; no longer shown or applied.";
     }
     if (parameterId == "macro_root") {
         return "Transposes the harmonic root in semitones.";
     }
     if (parameterId == "output_gain") {
-        return "Final output trim after the Substance macro.";
+        return "Final output trim after the Mix macro.";
     }
     return {};
 }
@@ -648,11 +678,17 @@ juce::String sliderText(const juce::String& parameterId, double value)
     if (parameterId == "delay_time") {
         return juce::String(static_cast<int>(std::round(value))) + " ms";
     }
+    if (parameterId == "filter_cutoff") {
+        if (value >= 1000.0) {
+            return juce::String(value / 1000.0, 1) + "k";
+        }
+        return juce::String(static_cast<int>(std::round(value))) + " Hz";
+    }
     if (parameterId == "tail_size") {
         const double multiplier = 1.0 + value * value * 9.0;
         return juce::String(multiplier, 1) + "x";
     }
-    if (parameterId == "tail_regen" || parameterId == "euclid_wet" || parameterId == "feedback" || parameterId == "wow_flutter" || parameterId == "space" || parameterId == "tone" || parameterId == "reverb_decay" || parameterId == "reverb_damping" || parameterId == "reverb_mod") {
+    if (parameterId == "tail_regen" || parameterId == "euclid_wet" || parameterId == "delay_level" || parameterId == "feedback" || parameterId == "wow_flutter" || parameterId == "drive" || parameterId == "reverb_level" || parameterId == "space" || parameterId == "tone" || parameterId == "reverb_decay" || parameterId == "reverb_damping" || parameterId == "reverb_mod" || parameterId == "filter_resonance" || parameterId == "filter_radiate") {
         return juce::String(static_cast<int>(std::round(value * 100.0))) + "%";
     }
     if (parameterId == "capture_level") {
@@ -1859,28 +1895,29 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
 
     addSlider("euclid_rate", "Rate", SliderLayout::Inspector);
     addSlider("euclid_wet", "Wet", SliderLayout::Inspector);
-    addSlider("delay_time", "Echo Time", SliderLayout::Inspector);
-    addSlider("feedback", "Repeats", SliderLayout::Inspector);
+    addSlider("delay_level", "Level", SliderLayout::Inspector);
+    addSlider("delay_time", "Time", SliderLayout::Inspector);
+    addSlider("feedback", "Feedback", SliderLayout::Inspector);
     addSlider("wow_flutter", "Wobble", SliderLayout::Inspector);
-    addSlider("tone", "Tone", SliderLayout::Inspector);
-    addSlider("space", "Tank Size", SliderLayout::Inspector);
-    addSlider("reverb_decay", "Tank Decay", SliderLayout::Inspector);
+    addSlider("drive", "Drive", SliderLayout::Inspector);
+    addSlider("reverb_level", "Level", SliderLayout::Inspector);
+    addSlider("space", "Size", SliderLayout::Inspector);
+    addSlider("reverb_decay", "Regen", SliderLayout::Inspector);
     addSlider("reverb_damping", "Damp", SliderLayout::Inspector);
-    addSlider("reverb_mod", "Motion", SliderLayout::Inspector);
-    addSlider("pluck_send", "Pluck In", SliderLayout::Inspector);
-    addSlider("tail_size", "Tail Len", SliderLayout::Inspector);
-    addSlider("tail_regen", "Regen", SliderLayout::Inspector);
-    addSlider("macro_substance", "Presence", SliderLayout::Bottom);
+    addSlider("tone", "Tone", SliderLayout::Inspector);
+    addSlider("tail_size", "Length", SliderLayout::Inspector);
+    addSlider("tail_regen", "Feedback", SliderLayout::Inspector);
+    addSlider("macro_substance", "Mix", SliderLayout::Bottom);
     addSlider("macro_choir", "Voices", SliderLayout::Bottom);
-    addSlider("macro_mneme", "Memory", SliderLayout::Bottom);
+    addSlider("macro_mneme", "Tail Memory", SliderLayout::Bottom);
     addSlider("macro_ephemeris", "Orbit Mod", SliderLayout::Bottom);
     addSlider("macro_fate", "Echo", SliderLayout::Bottom);
-    addSlider("macro_void", "Space", SliderLayout::Bottom);
+    addSlider("macro_void", "Reverb", SliderLayout::Bottom);
     addSlider("macro_pulse", "Pluck", SliderLayout::Bottom);
     addSlider("macro_root", "Root Drift", SliderLayout::Bottom);
-    addSlider("master_eq_low", "Low", SliderLayout::Bottom);
-    addSlider("master_eq_mid", "Mid", SliderLayout::Bottom);
-    addSlider("master_eq_high", "High", SliderLayout::Bottom);
+    addSlider("filter_cutoff", "Cutoff", SliderLayout::Bottom);
+    addSlider("filter_resonance", "Q", SliderLayout::Bottom);
+    addSlider("filter_radiate", "Radiate", SliderLayout::Bottom);
     addSlider("output_gain", "Output", SliderLayout::Bottom);
 
     droneHoldButton.setButtonText("On");
@@ -1923,7 +1960,7 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     planetWaveBox.setTooltip("Base oscillator waveform for the selected planet.");
     addAndMakeVisible(planetWaveBox);
 
-    tailModeLabel.setText("Tail Mode", juce::dontSendNotification);
+    tailModeLabel.setText("Mode", juce::dontSendNotification);
     tailModeLabel.setJustificationType(juce::Justification::centredLeft);
     tailModeLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
     tailModeLabel.setFont(controlFont(11.0f, juce::Font::bold));
@@ -1936,6 +1973,35 @@ AstralReverberationsEditor::AstralReverberationsEditor(AstralReverberationsAudio
     tailModeBox.setTooltip("LIM keeps tails bounded, DIST saturates the feedback loop, SHIM adds octave-like shimmer energy.");
     addAndMakeVisible(tailModeBox);
     tailModeAttachment = std::make_unique<ComboBoxAttachment>(audioProcessor.parameters(), "tail_mode", tailModeBox);
+
+    filterModeLabel.setText("Mode", juce::dontSendNotification);
+    filterModeLabel.setJustificationType(juce::Justification::centredLeft);
+    filterModeLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
+    filterModeLabel.setFont(controlFont(10.0f, juce::Font::bold));
+    filterModeLabel.setTooltip("Filter response mode.");
+    addAndMakeVisible(filterModeLabel);
+
+    filterModeBox.addItem("LP", 1);
+    filterModeBox.addItem("BP", 2);
+    filterModeBox.addItem("HP", 3);
+    filterModeBox.addItem("Notch", 4);
+    filterModeBox.setTooltip("Selects the stereo multimode filter response.");
+    addAndMakeVisible(filterModeBox);
+    filterModeAttachment = std::make_unique<ComboBoxAttachment>(audioProcessor.parameters(), "filter_mode", filterModeBox);
+
+    filterRouteLabel.setText("Route", juce::dontSendNotification);
+    filterRouteLabel.setJustificationType(juce::Justification::centredLeft);
+    filterRouteLabel.setColour(juce::Label::textColourId, juce::Colour(235, 239, 242));
+    filterRouteLabel.setFont(controlFont(10.0f, juce::Font::bold));
+    filterRouteLabel.setTooltip("Filter routing.");
+    addAndMakeVisible(filterRouteLabel);
+
+    filterRouteBox.addItem("Off", 1);
+    filterRouteBox.addItem("Dry", 2);
+    filterRouteBox.addItem("Wet", 3);
+    filterRouteBox.setTooltip("Routes the stereo multimode filter to the dry branch, wet return, or bypass.");
+    addAndMakeVisible(filterRouteBox);
+    filterRouteAttachment = std::make_unique<ComboBoxAttachment>(audioProcessor.parameters(), "filter_route", filterRouteBox);
 
     planetFilterLabel.setText("Filter", juce::dontSendNotification);
     planetFilterLabel.setJustificationType(juce::Justification::centredLeft);
@@ -2139,6 +2205,10 @@ void AstralReverberationsEditor::resized()
     planetWaveLabel.setVisible(showControls);
     tailModeBox.setVisible(showControls);
     tailModeLabel.setVisible(showControls);
+    filterModeBox.setVisible(showControls);
+    filterModeLabel.setVisible(showControls);
+    filterRouteBox.setVisible(showControls);
+    filterRouteLabel.setVisible(showControls);
     planetFilterSlider.setVisible(showControls);
     planetFilterLabel.setVisible(showControls);
     droneHoldButton.setVisible(showControls || showFocusPerformance);
@@ -2265,7 +2335,7 @@ void AstralReverberationsEditor::resized()
     orbitMap->setBounds(layout.orbitPanel);
 
     auto inspector = layout.inspector.reduced(12);
-    inspector.removeFromTop(32);
+    inspector.removeFromTop(36);
     auto waveRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
     planetWaveLabel.setBounds(waveRow.removeFromLeft(92));
     planetWaveBox.setBounds(waveRow);
@@ -2277,14 +2347,14 @@ void AstralReverberationsEditor::resized()
 
     constexpr int kInspectorLabelWidth = 82;
     inspector.removeFromTop(13);
-    for (int index = 2; index < 6; ++index) {
+    for (int index = 2; index < 7; ++index) {
         auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 2);
         labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
         sliders[index]->setBounds(row);
     }
 
     inspector.removeFromTop(13);
-    for (int index = 6; index < 11; ++index) {
+    for (int index = 7; index < 12; ++index) {
         auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 2);
         labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
         sliders[index]->setBounds(row);
@@ -2294,37 +2364,38 @@ void AstralReverberationsEditor::resized()
     auto tailModeRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
     tailModeLabel.setBounds(tailModeRow.removeFromLeft(kInspectorLabelWidth));
     tailModeBox.setBounds(tailModeRow);
-    for (int index = 11; index < 13; ++index) {
+    for (int index = 12; index < 14; ++index) {
         auto row = inspector.removeFromTop(kInspectorSliderRowHeight).reduced(0, 2);
         labels[index]->setBounds(row.removeFromLeft(kInspectorLabelWidth));
         sliders[index]->setBounds(row);
     }
 
-    inspector.removeFromTop(4);
-    auto speedRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
-    const int speedWidth = speedRow.getWidth() / 3;
-    slowButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
-    normalButton.setBounds(speedRow.removeFromLeft(speedWidth).reduced(2, 0));
-    fastButton.setBounds(speedRow.reduced(2, 0));
-    auto resetRow = inspector.removeFromTop(kInspectorRowHeight).reduced(0, 2);
-    resetPlanetButton.setBounds(resetRow.removeFromLeft(resetRow.getWidth() / 2).reduced(2, 0));
-    resetOrbitsButton.setBounds(resetRow.reduced(2, 0));
-
     limiterButton.setBounds(layout.meterColumn.reduced(10).removeFromBottom(32));
 
-    const int bottomSliderStart = 13;
+    const int bottomSliderStart = 14;
     const int bottomSliderCount = sliders.size() - bottomSliderStart;
-    const int cellWidth = layout.macroStrip.getWidth() / std::max(1, bottomSliderCount);
+    auto bottomArea = layout.macroStrip;
+    auto filterSelectArea = bottomArea.removeFromRight(116).reduced(6, 8);
+    bottomArea.removeFromRight(4);
+    const int cellWidth = bottomArea.getWidth() / std::max(1, bottomSliderCount);
     for (int index = bottomSliderStart; index < sliders.size(); ++index) {
         const int column = index - bottomSliderStart;
         auto cell = juce::Rectangle<int>(
-            layout.macroStrip.getX() + column * cellWidth,
-            layout.macroStrip.getY(),
+            bottomArea.getX() + column * cellWidth,
+            bottomArea.getY(),
             cellWidth,
-            layout.macroStrip.getHeight()).reduced(6, 8);
+            bottomArea.getHeight()).reduced(6, 8);
         labels[index]->setBounds(cell.removeFromTop(18));
         sliders[index]->setBounds(cell);
     }
+
+    auto modeRow = filterSelectArea.removeFromTop(46);
+    filterModeLabel.setBounds(modeRow.removeFromTop(16));
+    filterModeBox.setBounds(modeRow.reduced(0, 2));
+    filterSelectArea.removeFromTop(8);
+    auto routeRow = filterSelectArea.removeFromTop(46);
+    filterRouteLabel.setBounds(routeRow.removeFromTop(16));
+    filterRouteBox.setBounds(routeRow.reduced(0, 2));
 }
 
 void AstralReverberationsEditor::updateKeyboardControls()
@@ -2412,11 +2483,20 @@ static float defaultSliderValue(const juce::String& parameterId)
     if (parameterId == "delay_time") {
         return 420.0f;
     }
+    if (parameterId == "delay_level") {
+        return 0.45f;
+    }
     if (parameterId == "feedback") {
         return 0.42f;
     }
     if (parameterId == "wow_flutter") {
         return 0.25f;
+    }
+    if (parameterId == "drive") {
+        return 0.15f;
+    }
+    if (parameterId == "reverb_level") {
+        return 0.55f;
     }
     if (parameterId == "space" || parameterId == "tone") {
         return 0.55f;
@@ -2435,6 +2515,15 @@ static float defaultSliderValue(const juce::String& parameterId)
     }
     if (parameterId == "tail_size" || parameterId == "tail_regen") {
         return 0.0f;
+    }
+    if (parameterId == "filter_cutoff") {
+        return 1200.0f;
+    }
+    if (parameterId == "filter_resonance") {
+        return 0.25f;
+    }
+    if (parameterId == "filter_radiate") {
+        return 0.35f;
     }
     if (parameterId == "master_eq_low" || parameterId == "master_eq_mid" || parameterId == "master_eq_high") {
         return 0.0f;
@@ -2711,14 +2800,9 @@ void AstralReverberationsEditor::drawInterfaceChrome(juce::Graphics& graphics)
     graphics.setFont(controlFont(10.0f, juce::Font::bold));
     graphics.setColour(juce::Colour(235, 239, 242).withAlpha(0.92f));
     graphics.drawText("SOUND EDITOR", inspector.removeFromTop(16.0f), juce::Justification::centredLeft);
-    inspector.removeFromTop(8.0f);
-    auto drawInspectorGroup = [&graphics](juce::Rectangle<float> area, const juce::String& text, juce::Colour colour) {
-        graphics.setFont(controlFont(9.0f, juce::Font::bold));
-        graphics.setColour(colour.withAlpha(0.92f));
-        graphics.drawText(text, area, juce::Justification::centredLeft);
-    };
+    inspector.removeFromTop(6.0f);
 
-    drawInspectorGroup(inspector.removeFromTop(18.0f), "PLANET OSCILLATOR", goldColour());
+    drawProcessorHeader(graphics, inspector.removeFromTop(14.0f), "SELECTED VOICE", goldColour());
     inspector.removeFromTop(static_cast<float>(kInspectorRowHeight + kInspectorSliderRowHeight + 4));
     graphics.setColour(lineColour().withAlpha(0.52f));
     graphics.drawHorizontalLine(static_cast<int>(std::round(inspector.getY())), inspector.getX(), inspector.getRight());
@@ -2726,11 +2810,11 @@ void AstralReverberationsEditor::drawInterfaceChrome(juce::Graphics& graphics)
     graphics.setFont(controlFont(10.0f, juce::Font::bold));
     graphics.setColour(juce::Colour(235, 239, 242).withAlpha(0.92f));
     graphics.drawText("GLOBAL EFFECTS", inspector.removeFromTop(14.0f), juce::Justification::centredLeft);
-    drawInspectorGroup(inspector.removeFromTop(13.0f), "ECHO", cyanColour());
-    inspector.removeFromTop(static_cast<float>(kInspectorSliderRowHeight * 4));
-    drawInspectorGroup(inspector.removeFromTop(13.0f), "REVERB TANK", juce::Colour(150, 166, 255));
+    drawProcessorHeader(graphics, inspector.removeFromTop(13.0f), "ECHO", cyanColour());
     inspector.removeFromTop(static_cast<float>(kInspectorSliderRowHeight * 5));
-    drawInspectorGroup(inspector.removeFromTop(13.0f), "PLANET TAILS", juce::Colour(202, 142, 255));
+    drawProcessorHeader(graphics, inspector.removeFromTop(13.0f), "REVERB", juce::Colour(150, 166, 255));
+    inspector.removeFromTop(static_cast<float>(kInspectorSliderRowHeight * 5));
+    drawProcessorHeader(graphics, inspector.removeFromTop(13.0f), "CAPTURE TAILS", juce::Colour(202, 142, 255));
 }
 
 void AstralReverberationsEditor::drawSelectedPlanetSummary(juce::Graphics& graphics, juce::Rectangle<int> area)

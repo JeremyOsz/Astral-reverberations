@@ -56,11 +56,6 @@ float equalPowerWet(float mix)
     return std::sin(clamp01(mix) * kPi * 0.5f);
 }
 
-float dbToGain(float db)
-{
-    return std::pow(10.0f, db / 20.0f);
-}
-
 float shortestUnitDelta(float target, float current)
 {
     float delta = target - current;
@@ -202,6 +197,83 @@ float AstralReverbDelay::KarplusPluck::process()
     return current * level;
 }
 
+void AstralReverbDelay::MultimodeFilterCore::reset()
+{
+    ic1eq = 0.0f;
+    ic2eq = 0.0f;
+}
+
+float AstralReverbDelay::MultimodeFilterCore::process(
+    float input,
+    float cutoffHz,
+    float resonance,
+    int mode,
+    double currentSampleRate)
+{
+    const float safeSampleRate = static_cast<float>(std::max(1.0, currentSampleRate));
+    const float safeCutoff = std::clamp(cutoffHz, 20.0f, safeSampleRate * 0.45f);
+    const float g = std::tan(kPi * safeCutoff / safeSampleRate);
+    const float k = 2.0f - std::clamp(resonance, 0.0f, 1.0f) * 1.55f;
+    const float denominator = 1.0f / (1.0f + g * (g + k));
+    const float v3 = sanitize(input) - ic2eq;
+    const float v1 = (g * v3 + ic1eq) * denominator;
+    const float v2 = g * v1 + ic2eq;
+    ic1eq = sanitize(2.0f * v1 - ic1eq);
+    ic2eq = sanitize(2.0f * v2 - ic2eq);
+
+    const float lowPass = v2;
+    const float bandPass = v1;
+    const float highPass = input - k * v1 - v2;
+    const float notch = highPass + lowPass;
+    switch (std::clamp(mode, 0, 3)) {
+        case 1:
+            return sanitize(bandPass);
+        case 2:
+            return sanitize(highPass);
+        case 3:
+            return sanitize(notch);
+        default:
+            return sanitize(lowPass);
+    }
+}
+
+void AstralReverbDelay::StereoMultimodeFilter::reset()
+{
+    leftA.reset();
+    leftB.reset();
+    rightA.reset();
+    rightB.reset();
+}
+
+void AstralReverbDelay::StereoMultimodeFilter::process(
+    float inputLeft,
+    float inputRight,
+    float cutoffHz,
+    float resonance,
+    float radiate,
+    int mode,
+    double currentSampleRate,
+    float& outputLeft,
+    float& outputRight)
+{
+    const float safeRadiate = clamp01(radiate);
+    const float spread = safeRadiate * 0.72f;
+    const float safeCutoff = std::clamp(cutoffHz, 35.0f, 16000.0f);
+    const float leftCutoffA = safeCutoff * (1.0f - spread * 0.68f);
+    const float leftCutoffB = safeCutoff * (1.0f + spread * 0.30f);
+    const float rightCutoffA = safeCutoff * (1.0f + spread * 0.68f);
+    const float rightCutoffB = safeCutoff * (1.0f - spread * 0.30f);
+    const float secondCoreGain = 0.58f + safeRadiate * 0.18f;
+    const float normalizer = 1.0f / (1.0f + secondCoreGain);
+
+    outputLeft = sanitize((leftA.process(inputLeft, leftCutoffA, resonance, mode, currentSampleRate)
+                              + leftB.process(inputLeft, leftCutoffB, resonance * 0.88f, mode, currentSampleRate) * secondCoreGain)
+        * normalizer);
+    outputRight = sanitize((rightA.process(inputRight, rightCutoffA, resonance, mode, currentSampleRate)
+                               + rightB.process(inputRight, rightCutoffB, resonance * 0.88f, mode, currentSampleRate) * secondCoreGain)
+        * normalizer);
+}
+
 void AstralReverbDelay::prepare(double newSampleRate, int maximumExpectedBlockSize)
 {
     sampleRate = std::max(1.0, newSampleRate);
@@ -244,6 +316,7 @@ void AstralReverbDelay::reset()
     masterLowRight.reset();
     masterHighLeft.reset();
     masterHighRight.reset();
+    outputFilter.reset();
     reverbTankPluck.reset();
     smoothedDelaySamples = millisecondsToSamples(420.0f, sampleRate);
     wowPhase = 0.0f;
@@ -299,11 +372,11 @@ void AstralReverbDelay::processBlock(
     const float wetGain = equalPowerWet(parameters.mix);
     const float delayLevel = clamp01(parameters.delayLevel);
     const float reverbLevel = clamp01(parameters.reverbLevel);
-    const float lowEqGain = dbToGain(std::clamp(parameters.eqLowGainDb, -12.0f, 12.0f));
-    const float midEqGain = dbToGain(std::clamp(parameters.eqMidGainDb, -12.0f, 12.0f));
-    const float highEqGain = dbToGain(std::clamp(parameters.eqHighGainDb, -12.0f, 12.0f));
-    const float lowEqCoefficient = onePoleCoefficient(240.0f, sampleRate);
-    const float highEqCoefficient = onePoleCoefficient(4200.0f, sampleRate);
+    const int filterRoute = std::clamp(parameters.filterRoute, 0, 2);
+    const int filterMode = std::clamp(parameters.filterMode, 0, 3);
+    const float filterCutoffHz = std::clamp(parameters.filterCutoffHz, 35.0f, 16000.0f);
+    const float filterResonance = clamp01(parameters.filterResonance);
+    const float filterRadiate = clamp01(parameters.filterRadiate);
     const float outputGain = std::clamp(parameters.outputGain, 0.0f, 2.0f);
     const float reverbTankTapLevel = std::clamp(parameters.reverbTankTapLevel, 0.0f, 2.5f);
     const float reverbTankTapPan = std::clamp(parameters.reverbTankTapPan, -1.0f, 1.0f);
@@ -398,18 +471,36 @@ void AstralReverbDelay::processBlock(
 
         const float wetLeft = delayedLeft * delayLevel + reverbLeft * reverbLevel;
         const float wetRight = delayedRight * delayLevel + reverbRight * reverbLevel;
-        const float mixedLeft = sanitize(inLeft * dryGain + tankTapDryLeft + wetLeft * wetGain);
-        const float mixedRight = sanitize(inRight * dryGain + tankTapDryRight + wetRight * wetGain);
-        const float lowLeft = masterLowLeft.process(mixedLeft, lowEqCoefficient);
-        const float lowRight = masterLowRight.process(mixedRight, lowEqCoefficient);
-        const float highLowPassedLeft = masterHighLeft.process(mixedLeft, highEqCoefficient);
-        const float highLowPassedRight = masterHighRight.process(mixedRight, highEqCoefficient);
-        const float highLeft = mixedLeft - highLowPassedLeft;
-        const float highRight = mixedRight - highLowPassedRight;
-        const float midLeft = mixedLeft - lowLeft - highLeft;
-        const float midRight = mixedRight - lowRight - highRight;
-        output.left[sample] = sanitize((lowLeft * lowEqGain + midLeft * midEqGain + highLeft * highEqGain) * outputGain);
-        output.right[sample] = sanitize((lowRight * lowEqGain + midRight * midEqGain + highRight * highEqGain) * outputGain);
+        float dryBranchLeft = sanitize(inLeft * dryGain + tankTapDryLeft);
+        float dryBranchRight = sanitize(inRight * dryGain + tankTapDryRight);
+        float wetBranchLeft = sanitize(wetLeft * wetGain);
+        float wetBranchRight = sanitize(wetRight * wetGain);
+        if (filterRoute == 1) {
+            outputFilter.process(
+                dryBranchLeft,
+                dryBranchRight,
+                filterCutoffHz,
+                filterResonance,
+                filterRadiate,
+                filterMode,
+                sampleRate,
+                dryBranchLeft,
+                dryBranchRight);
+        } else if (filterRoute == 2) {
+            outputFilter.process(
+                wetBranchLeft,
+                wetBranchRight,
+                filterCutoffHz,
+                filterResonance,
+                filterRadiate,
+                filterMode,
+                sampleRate,
+                wetBranchLeft,
+                wetBranchRight);
+        }
+
+        output.left[sample] = sanitize((dryBranchLeft + wetBranchLeft) * outputGain);
+        output.right[sample] = sanitize((dryBranchRight + wetBranchRight) * outputGain);
 
         advanceWrapped(wowPhase, wowIncrement);
         advanceWrapped(flutterPhase, flutterIncrement);

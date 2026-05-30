@@ -75,6 +75,7 @@ private:
         std::vector<float> right;
         int writeIndex = 0;
         float envelope = 0.0f;
+        float displayLevel = 0.0f;
         float smoothedDelaySamples = 0.0f;
         float shimmerDcLeft = 0.0f;
         float shimmerDcRight = 0.0f;
@@ -87,6 +88,8 @@ private:
         float process(float inputLeft, float inputRight, float tailSeconds, float level, float pan, bool active, float tailRegen, int tailMode, float& rightOut, double sampleRate);
         /// Returns true while the tail is being excited or still audibly decaying.
         bool isReplacingLayer() const noexcept { return envelope > 0.0008f; }
+        /// Returns a smooth UI level that tracks captured energy rather than sparse delay taps.
+        float getDisplayLevel() const noexcept { return displayLevel; }
     };
 
     double sampleRate = 44100.0;

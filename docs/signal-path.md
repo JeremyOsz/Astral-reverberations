@@ -64,7 +64,7 @@ flowchart TB
     Runtime["Runtime state\nheld notes, sustain,\nmanual tail gates"]
     Root["Root resolver\nmanual root or lowest held note\nplus pitch bend"]
     Gate["Gate resolver\nDrone On, MIDI notes,\nsustain, gate mode"]
-    Macro["MacroMapping\nSubstance, Choir, Mneme,\nEphemeris, Fate, Void, Ring, Root Drift"]
+    Macro["MacroMapping\nMix, Tail Memory, Voices,\nOrbit Mod, Echo, Reverb, Pluck, Root Drift"]
     DroneParams["PlanetaryDroneParameters"]
     EffectParams["AstralReverbDelayParameters"]
 
@@ -136,7 +136,7 @@ flowchart LR
 The drone path has three audible ingredients:
 
 - Oscillator drone voices from planetary harmonic layers.
-- Short captured-input scans, enabled by `Capture` and scaled by `Mneme`.
+- Short captured-input scans, enabled by `Capture` and scaled by Tail Memory.
 - Manual planet tails, excited by number keys or MIDI tail notes while capture is armed.
 
 ## Manual Orbit Tail Loop
@@ -147,9 +147,9 @@ Manual tails are separate from the main delay/reverb freeze. They are per-planet
 flowchart LR
     KeyGate["Planet tail gate\n1-0 or MIDI 36-45"]
     SourceSelect["Tail source\nexternal input if present,\notherwise planet voice"]
-    Size["Tail Size\nscales tail seconds"]
-    Regen["Regen\nfeedback lift"]
-    Mode["Tail Mode\nLIM / DIST / SHIM"]
+    Size["Length\nscales tail seconds"]
+    Regen["Feedback\nregeneration lift"]
+    Mode["Mode\nLIM / DIST / SHIM"]
     DelayRead["Smoothed interpolated\nfeedback read"]
     FeedbackShape["Mode shaping\nlimiter, distortion,\nor shimmer injection"]
     Write["Circular tail buffer write"]
@@ -170,9 +170,9 @@ flowchart LR
 
 Crackle-sensitive points:
 
-- `Tail Size` changes the feedback read distance.
+- `Length` (`tail_size`) changes the feedback read distance.
 - The read distance is smoothed before interpolation.
-- `Regen` can approach very high feedback values, so the write path is bounded with soft limiting.
+- `Feedback` (`tail_regen`) can approach very high feedback values, so the write path is bounded with soft limiting.
 - `DIST` mode is intentionally nonlinear and can sound gritty at high regen.
 
 ## Euclidean And Tank Plucks
@@ -201,7 +201,7 @@ flowchart LR
     Tank --> EffectInput
 ```
 
-## Delay, Reverb, EQ, Output
+## Delay, Reverb, Filter, Output
 
 `AstralReverbDelay` takes the post-drone working buffer and applies the main spatial instrument path.
 
@@ -216,14 +216,15 @@ flowchart LR
     Freeze["Freeze switch\nrecirculate or write input"]
     SoftClip["Soft clip feedback write"]
     Reverb["Compact FDN reverb\nmodulated + damped"]
-    WetMix["Delay + reverb wet mix"]
-    EQ["Low / Mid / High"]
+    WetBranch["Delay + reverb wet branch"]
+    Filter["Stereo multimode filter\nOff / Dry / Wet route"]
+    Sum["Dry + wet sum"]
     Output["Output gain\nhost output"]
 
     In --> DryGate
     In --> TankTap
     TankTap --> DelayReads
-    TankTap --> WetMix
+    TankTap --> DryGate
     DelayReads --> NodeTaps
     NodeTaps --> FeedbackFilter
     FeedbackFilter --> Freeze
@@ -231,11 +232,12 @@ flowchart LR
     Freeze --> SoftClip
     SoftClip --> DelayReads
     DelayReads --> Reverb
-    DelayReads --> WetMix
-    Reverb --> WetMix
-    DryGate --> WetMix
-    WetMix --> EQ
-    EQ --> Output
+    DelayReads --> WetBranch
+    Reverb --> WetBranch
+    DryGate --> Filter
+    WetBranch --> Filter
+    Filter --> Sum
+    Sum --> Output
 ```
 
 DSP safety points:
@@ -244,6 +246,7 @@ DSP safety points:
 - Delay reads use interpolation.
 - Feedback is low-pass filtered.
 - Feedback writes are soft-clipped.
+- The output filter is bypassed by default and can color either the dry branch or the wet return.
 - Non-finite samples are sanitized.
 - `Freeze` stops new dry input from entering the feedback loop.
 
@@ -255,8 +258,7 @@ Use this table when a symptom appears.
 |---------|------------------|-----------------|
 | Drone is quiet with Input Monitor off | Top-level dry routing | `PluginProcessor.cpp` live-input subtraction and effect `inputMonitor` handoff |
 | Crackle while moving tail controls | Manual orbit tail loop | Tail read smoothing, interpolation, regen value, `DIST` mode |
-| Capture tails are not audible | `PlanetaryDrone` manual tails | `Capture`, Mneme/capture level, tail gate key, planet mute, input level |
+| Capture tails are not audible | `PlanetaryDrone` manual tails | `Capture`, Tail Memory/capture level, tail gate key, planet mute, input level |
 | Euclidean display moves but no plucks | Euclidean scheduler | `euclid_enable`, rate, send/wet, planet mutes, pending tap queue |
 | Plucks work but drone does not gate | Control/root path | Held notes, sustain, `Drone On`, gate mode, manual root |
 | Output meter low despite active sound | Delay/reverb/output block | Wet/dry mix, Low/Mid/High, Output macro, limiter state |
-

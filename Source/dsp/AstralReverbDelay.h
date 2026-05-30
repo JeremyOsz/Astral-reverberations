@@ -36,6 +36,11 @@ struct AstralParameters {
     float eqLowGainDb = 0.0f;
     float eqMidGainDb = 0.0f;
     float eqHighGainDb = 0.0f;
+    int filterRoute = 0;
+    int filterMode = 0;
+    float filterCutoffHz = 1200.0f;
+    float filterResonance = 0.25f;
+    float filterRadiate = 0.35f;
     float outputGain = 1.0f;
 };
 
@@ -98,6 +103,33 @@ private:
         float process();
     };
 
+    struct MultimodeFilterCore {
+        float ic1eq = 0.0f;
+        float ic2eq = 0.0f;
+
+        void reset();
+        float process(float input, float cutoffHz, float resonance, int mode, double sampleRate);
+    };
+
+    struct StereoMultimodeFilter {
+        MultimodeFilterCore leftA;
+        MultimodeFilterCore leftB;
+        MultimodeFilterCore rightA;
+        MultimodeFilterCore rightB;
+
+        void reset();
+        void process(
+            float inputLeft,
+            float inputRight,
+            float cutoffHz,
+            float resonance,
+            float radiate,
+            int mode,
+            double sampleRate,
+            float& outputLeft,
+            float& outputRight);
+    };
+
     static constexpr int kReverbLineCount = 4;
 
     double sampleRate = 44100.0;
@@ -114,6 +146,7 @@ private:
     OnePoleLowPass masterLowRight;
     OnePoleLowPass masterHighLeft;
     OnePoleLowPass masterHighRight;
+    StereoMultimodeFilter outputFilter;
     KarplusPluck reverbTankPluck;
     std::array<astro::AstroModulationFrame::DelayTap, static_cast<std::size_t>(astro::PlanetId::Count)> smoothedDelayTaps{};
     float smoothedDelaySamples = 1.0f;

@@ -15,7 +15,7 @@ Implementation: `Source/plugin/PluginProcessor.cpp` → `processMidiInput()`, wi
 | Note On **60–69** | Yes | One-shot reverb tank pluck (velocity → wet) |
 | Note Off | Yes | Clears held note / tail gate |
 | All Notes Off / All Sound Off | Yes | Clears held notes and tail gates |
-| CC **20–27** | Yes | Macros Substance … Root Drift |
+| CC **20–27** | Yes | Macros Mix … Root Drift |
 | CC **28–29** | Yes | Euclidean rate and wet |
 | CC **30–34** | Yes | Drone On, Capture, Freeze, Euclidean enable, Manual Root |
 | CC **64** | Yes | Sustain pedal holds drone gate |
@@ -76,18 +76,33 @@ All parameters are exposed through JUCE **APVTS** (`createParameterLayout()`). A
 
 ### Parameters that affect audio (safe for MIDI learn)
 
-| ID | UI label | Role |
+| ID | Label | Role |
 |----|----------|------|
-| `macro_substance` | Substance | Wet mix, echo/reverb levels, output level (via macro resolver) |
-| `macro_mneme` | Mneme | Capture level, feedback safety |
-| `macro_choir` | Choir | Harmonic spread and aspect bloom |
+| `macro_substance` | Mix | Wet mix, echo/reverb levels, output level (via macro resolver) |
+| `macro_mneme` | Tail Memory | Capture level, feedback safety |
+| `macro_choir` | Voices | Harmonic spread and aspect bloom |
 | `drone_level` | Drone | Planetary oscillator level (0-1.5x) |
 | `pluck_level` | Pluck | Karplus ring pluck level (0-1.5x) |
-| `macro_ephemeris` | Ephemeris | Astro modulation depth |
-| `macro_fate` | Fate | Delay time, feedback, wow, drive |
-| `macro_void` | Void | Space, tone, reverb emphasis |
-| `macro_pulse` | Ring | Pluck timbre, octave |
+| `macro_ephemeris` | Orbit Mod | Astro modulation depth |
+| `macro_fate` | Echo | Delay time, feedback, wow, drive |
+| `macro_void` | Reverb | Size, tone, reverb emphasis |
+| `macro_pulse` | Pluck | Pluck timbre, octave |
 | `macro_root` | Root Drift | ±12 semitone root offset |
+| `delay_level` | Level | Direct echo output level offset from the Mix and Echo macros |
+| `delay_time` | Time | Direct echo time offset from the Echo macro |
+| `feedback` | Feedback | Direct echo regeneration offset from the Echo macro |
+| `wow_flutter` | Wobble | Direct tape-style modulation offset from the Echo macro |
+| `drive` | Drive | Direct tape-style echo saturation offset from the Echo macro |
+| `reverb_level` | Level | Direct reverb output level offset from the Mix and Reverb macros |
+| `space` | Size | Direct reverb size offset from the Reverb macro |
+| `tone` | Tone | Shared echo/reverb brightness offset from the Reverb macro |
+| `reverb_decay` | Regen | Reverb tank regeneration |
+| `reverb_damping` | Damp | Reverb tank damping |
+| `reverb_mod` | Motion | Reverb tank stereo motion |
+| `pluck_send` | Tap In | Host/MIDI-learn send amount from orbit taps and Euclidean plucks into the tank |
+| `tail_mode` | Mode | Capture-tail character: `LIM`, `DIST`, or `SHIM` |
+| `tail_size` | Length | Capture-tail length multiplier |
+| `tail_regen` | Feedback | Capture-tail regeneration |
 | `euclid_enable` | Euclidean Plucks | On/off |
 | `euclid_rate` | Rate | Pluck tempo |
 | `euclid_wet` | Wet | Pluck send level |
@@ -98,17 +113,24 @@ All parameters are exposed through JUCE **APVTS** (`createParameterLayout()`). A
 | `root_lock` | Manual Root | Ignore MIDI for root |
 | `freeze` | Freeze | Main delay/reverb freeze |
 | `input_monitor` | Input Monitor | Dry input in wet path |
+| `filter_route` | Filter Route | Bypass, dry branch, or wet return routing |
+| `filter_mode` | Filter Mode | LP, BP, HP, or notch response |
+| `filter_cutoff` | Cutoff | Routed stereo multimode filter cutoff |
+| `filter_resonance` | Q | Routed stereo multimode filter resonance |
+| `filter_radiate` | Radiate | Stereo cutoff spread/asymmetry |
 | `astro_speed` | (speed buttons) | Simulated orbit rate |
 
-Macro → DSP mapping detail: `Source/plugin/MacroMapping.cpp` and `docs/dsp-design.md`.
+Macro → DSP mapping detail: `Source/plugin/MacroMapping.cpp` and `docs/dsp-design.md`. The direct echo/reverb/tail controls are read by `readParameters()` as offsets or dedicated controls, so they are safe for MIDI learn.
 
 ### Parameters in state but not wired to `processBlock`
 
 These exist for preset compatibility / future use. **MIDI CC mapped to them will not change audio today:**
 
-`mix`, `delay_level`, `reverb_level`, `delay_time`, `feedback`, `space`, `tone`, `pluck_timbre`, `pluck_octave`, `mod_depth`, `wow_flutter`, `drive`, `astro_amount`, `capture_level`, `harmonic_spread`, `aspect_depth`, `root_offset`, `output_gain`.
+`pluck_timbre`, `pluck_octave`, `harmonic_spread`, `aspect_depth`, `root_offset`, `master_eq_low`, `master_eq_mid`, `master_eq_high`.
 
-The **Output** slider (`output_gain`) is applied directly in `readParameters()`.
+The `master_eq_*` parameters are retained for old session/preset state compatibility. The visible output tone controls are now `filter_route`, `filter_mode`, `filter_cutoff`, `filter_resonance`, and `filter_radiate`.
+
+The direct wet/effect trim parameters (`mix`, `mod_depth`, `astro_amount`, `capture_level`, `output_gain`) are applied directly in `readParameters()`.
 
 ### State not in APVTS (no MIDI learn path)
 
@@ -127,7 +149,7 @@ Stored in processor atomics / ValueTree properties; lost unless custom MIDI mapp
 | Manual root | CC 34 ≥ 64 | `root_lock` |
 | Tail capture | Notes **36–45** | Planet tail gates; capture auto-arms |
 | Tank pluck | Notes **60–69** | `tapOrbitReverbTank` (velocity → wet) |
-| Substance … Root Drift | CC **20–27** | `macro_substance` … `macro_root` |
+| Mix … Root Drift | CC **20–27** | `macro_substance` … `macro_root` |
 | Euclidean rate / wet | CC **28–29** | `euclid_rate`, `euclid_wet` |
 | Drone On / Capture / Freeze / Euclidean | CC **30–33** | Toggles (≥ 64 on) |
 | Organ mode | CC **35** | `organ_mode` |

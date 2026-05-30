@@ -13,7 +13,7 @@ The astrology engine is intentionally offline. It uses approximate orbital perio
 - **Capture** — arm input recording, then hold planet keys to excite orbit-scaled tail buffers (see below).
 - **Euclidean plucks** — rhythmic sends into the reverb tank from the astro clock.
 - **Historical presets** — 30 fixed UTC moments (Battle of Hastings through September 11) each with a suggested key; recall switches to Manual Date mode.
-- **Eight macros** — Substance, Mneme, Choir, Ephemeris, Fate, Void, Ring (Pulse), and Root Drift fold many underlying DSP parameters.
+- **Eight macros** — Mix, Tail Memory, Voices, Orbit Mod, Echo, Reverb, Pluck, and Root Drift fold many underlying DSP parameters.
 
 Inspector astro modes: **Now**, **Manual Date**, and **Simulated Orbit** (`astro_speed`).
 
@@ -44,7 +44,7 @@ Editor focus is required for the keyboard row; MIDI duplicates several gestures.
 
 ## Capture
 
-Capture is an armed input-recording mode. For audible orbit-tail capture, turn on **Capture**, raise **Mneme**, and hold a planet number key (`1`–`0`) or MIDI note **36–45** while audio is entering the plugin.
+Capture is an armed input-recording mode. For audible orbit-tail capture, turn on **Capture**, raise **Tail Memory**, and hold a planet number key (`1`–`0`) or MIDI note **36–45** while audio is entering the plugin.
 
 See [`docs/capture-workflow.md`](docs/capture-workflow.md) for the signal path, orbit decay lengths, and troubleshooting.
 
